@@ -1,0 +1,216 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { User, Campus, AuditLog } from '../models/index.js';
+import { authenticate } from '../middleware/auth.js';
+import { authorize, scopeToCampus } from '../middleware/authorize.js';
+
+const router = Router();
+
+router.use(authenticate);
+router.use(authorize('super_admin', 'admin'));
+router.use(scopeToCampus);
+
+// GET /api/users
+router.get('/', async (req, res) => {
+  try {
+    const where = { deleted_at: null, ...req.campusScope };
+
+    if (req.query.role) {
+      where.role = req.query.role;
+    }
+    if (req.query.is_active !== undefined) {
+      where.is_active = req.query.is_active === 'true';
+    }
+
+    const users = await User.findAll({
+      where,
+      attributes: { exclude: ['password'] },
+      include: [{ model: Campus, as: 'campus' }],
+      order: [['name', 'ASC']],
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('List users error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/users/staff/available
+router.get('/staff/available', async (req, res) => {
+  try {
+    const where = { deleted_at: null, is_active: true, ...req.campusScope };
+
+    if (req.query.campus_id && req.user.role === 'super_admin') {
+      where.campus_id = req.query.campus_id;
+    }
+
+    const staff = await User.findAll({
+      where,
+      attributes: ['id', 'name', 'email', 'role', 'campus_id'],
+      order: [['name', 'ASC']],
+    });
+
+    res.json(staff);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/users/:id
+router.get('/:id', async (req, res) => {
+  try {
+    const user = await User.findOne({
+      where: { id: req.params.id, deleted_at: null },
+      attributes: { exclude: ['password'] },
+      include: [{ model: Campus, as: 'campus' }],
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (req.user.role === 'admin' && user.campus_id !== req.user.campus_id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/users
+router.post('/', async (req, res) => {
+  try {
+    const { name, email, phone, password, role, campus_id } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email and password are required' });
+    }
+
+    if (role === 'super_admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super admin can create super admin accounts' });
+    }
+
+    const existing = await User.findOne({ where: { email } });
+    if (existing) {
+      return res.status(400).json({ error: 'Email already in use' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : campus_id;
+
+    const user = await User.create({
+      name,
+      email,
+      phone,
+      password: hashedPassword,
+      role: role || 'staff',
+      campus_id: assignedCampus,
+    });
+
+    await AuditLog.create({
+      user_id: req.user.id,
+      action: 'user.create',
+      entity_type: 'user',
+      entity_id: user.id,
+      new_values: { name, email, role: role || 'staff', campus_id: assignedCampus },
+    });
+
+    const userData = user.toJSON();
+    delete userData.password;
+    res.status(201).json(userData);
+  } catch (error) {
+    console.error('Create user error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// PUT /api/users/:id
+router.put('/:id', async (req, res) => {
+  try {
+    const user = await User.findOne({ where: { id: req.params.id, deleted_at: null } });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (req.user.role === 'admin' && user.campus_id !== req.user.campus_id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (user.role === 'super_admin' && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Cannot modify super admin account' });
+    }
+
+    const { name, email, phone, role, campus_id, is_active } = req.body;
+    const oldValues = { name: user.name, email: user.email, role: user.role, is_active: user.is_active };
+
+    if (email && email !== user.email) {
+      const existing = await User.findOne({ where: { email } });
+      if (existing) {
+        return res.status(400).json({ error: 'Email already in use' });
+      }
+    }
+
+    await user.update({
+      name: name || user.name,
+      email: email || user.email,
+      phone: phone !== undefined ? phone : user.phone,
+      role: role || user.role,
+      campus_id: campus_id !== undefined ? campus_id : user.campus_id,
+      is_active: is_active !== undefined ? is_active : user.is_active,
+    });
+
+    await AuditLog.create({
+      user_id: req.user.id,
+      action: 'user.update',
+      entity_type: 'user',
+      entity_id: user.id,
+      old_values: oldValues,
+      new_values: { name: user.name, email: user.email, role: user.role, is_active: user.is_active },
+    });
+
+    const userData = user.toJSON();
+    delete userData.password;
+    res.json(userData);
+  } catch (error) {
+    console.error('Update user error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /api/users/:id (soft delete)
+router.delete('/:id', async (req, res) => {
+  try {
+    const user = await User.findOne({ where: { id: req.params.id, deleted_at: null } });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.role === 'super_admin') {
+      return res.status(403).json({ error: 'Cannot delete super admin account' });
+    }
+
+    if (req.user.role === 'admin' && user.campus_id !== req.user.campus_id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    await user.update({ deleted_at: new Date(), is_active: false });
+
+    await AuditLog.create({
+      user_id: req.user.id,
+      action: 'user.delete',
+      entity_type: 'user',
+      entity_id: user.id,
+    });
+
+    res.json({ message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+export default router;

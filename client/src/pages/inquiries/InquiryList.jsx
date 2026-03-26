@@ -1,0 +1,217 @@
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus, Eye, Edit2 } from 'lucide-react';
+import api from '../../api';
+import { useAuth } from '../../context/AuthContext';
+import { isAdminOrAbove, isSuperAdmin } from '../../utils/roleUtils';
+import { formatDate, isOverdue } from '../../utils/helpers';
+import { INQUIRY_STATUSES, PRIORITIES } from '../../utils/constants';
+import PageHeader from '../../components/ui/PageHeader';
+import SearchInput from '../../components/ui/SearchInput';
+import FilterBar from '../../components/ui/FilterBar';
+import Pagination from '../../components/ui/Pagination';
+import LoadingSpinner from '../../components/ui/LoadingSpinner';
+import EmptyState from '../../components/ui/EmptyState';
+import { InquiryStatusBadge, PriorityBadge } from '../../components/ui/StatusBadge';
+
+export default function InquiryList() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [inquiries, setInquiries] = useState([]);
+  const [pagination, setPagination] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({});
+  const [page, setPage] = useState(1);
+
+  // Load filter options
+  const [campuses, setCampuses] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [sources, setSources] = useState([]);
+  const [staff, setStaff] = useState([]);
+
+  useEffect(() => {
+    loadFilterOptions();
+  }, []);
+
+  useEffect(() => {
+    loadInquiries();
+  }, [search, filters, page]);
+
+  async function loadFilterOptions() {
+    try {
+      const [campRes, classRes, srcRes] = await Promise.all([
+        api.get('/campuses'),
+        api.get('/classes'),
+        api.get('/settings/inquiry-sources'),
+      ]);
+      setCampuses(campRes.data);
+      setClasses(classRes.data);
+      setSources(srcRes.data);
+
+      if (isAdminOrAbove(user)) {
+        const staffRes = await api.get('/users/staff/available');
+        setStaff(staffRes.data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadInquiries() {
+    setLoading(true);
+    try {
+      const params = { page, limit: 20, search, ...filters };
+      Object.keys(params).forEach(k => {
+        if (!params[k]) delete params[k];
+      });
+      const res = await api.get('/inquiries', { params });
+      setInquiries(res.data.inquiries);
+      setPagination(res.data.pagination);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const filterConfig = [
+    { key: 'status', label: 'All Statuses', options: INQUIRY_STATUSES.map(s => ({ value: s.value, label: s.label })) },
+    { key: 'priority', label: 'All Priorities', options: PRIORITIES.map(p => ({ value: p.value, label: p.label })) },
+  ];
+
+  if (isSuperAdmin(user)) {
+    filterConfig.push({ key: 'campus_id', label: 'All Campuses', options: campuses.map(c => ({ value: c.id, label: c.name })) });
+  }
+
+  filterConfig.push(
+    { key: 'class_id', label: 'All Classes', options: classes.map(c => ({ value: c.id, label: c.name })) },
+    { key: 'source_id', label: 'All Sources', options: sources.map(s => ({ value: s.id, label: s.name })) },
+  );
+
+  if (isAdminOrAbove(user)) {
+    filterConfig.push({ key: 'assigned_staff_id', label: 'All Staff', options: staff.map(s => ({ value: s.id, label: s.name })) });
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Inquiries"
+        subtitle={`${pagination.total || 0} total inquiries`}
+        action={
+          <Link
+            to="/inquiries/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            New Inquiry
+          </Link>
+        }
+      />
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        {/* Search & Filters */}
+        <div className="p-4 space-y-3 border-b border-gray-100">
+          <SearchInput
+            value={search}
+            onChange={(val) => { setSearch(val); setPage(1); }}
+            placeholder="Search by student name, parent name, or phone..."
+          />
+          <FilterBar
+            filters={filterConfig}
+            values={filters}
+            onChange={(key, val) => { setFilters(prev => ({ ...prev, [key]: val })); setPage(1); }}
+            onClear={() => { setFilters({}); setPage(1); }}
+          />
+        </div>
+
+        {/* Table */}
+        {loading ? (
+          <LoadingSpinner />
+        ) : inquiries.length === 0 ? (
+          <EmptyState
+            title="No inquiries found"
+            message="Try adjusting your search or filters"
+            action={
+              <Link to="/inquiries/new" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+                Create first inquiry
+              </Link>
+            }
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                  <th className="px-4 py-3">Student</th>
+                  <th className="px-4 py-3">Parent</th>
+                  <th className="px-4 py-3">Phone</th>
+                  <th className="px-4 py-3">Class</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Priority</th>
+                  <th className="px-4 py-3">Follow-up</th>
+                  <th className="px-4 py-3">Assigned</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {inquiries.map(inq => (
+                  <tr key={inq.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <Link to={`/inquiries/${inq.id}`} className="font-medium text-gray-900 hover:text-primary-600">
+                        {inq.student_name}
+                      </Link>
+                      <p className="text-xs text-gray-400">{formatDate(inq.inquiry_date)}</p>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
+                    <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>
+                    <td className="px-4 py-3 text-gray-600">{inq.classApplying?.name}</td>
+                    <td className="px-4 py-3"><InquiryStatusBadge status={inq.status} /></td>
+                    <td className="px-4 py-3"><PriorityBadge priority={inq.priority} /></td>
+                    <td className="px-4 py-3">
+                      {inq.next_follow_up_date ? (
+                        <span className={`text-xs ${isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                          {formatDate(inq.next_follow_up_date)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 text-sm">{inq.assignedStaff?.name || '-'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link
+                          to={`/inquiries/${inq.id}`}
+                          className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                          title="View"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                        <Link
+                          to={`/inquiries/${inq.id}/edit`}
+                          className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                          title="Edit"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {pagination.totalPages > 1 && (
+          <Pagination
+            currentPage={pagination.page}
+            totalPages={pagination.totalPages}
+            onPageChange={setPage}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
