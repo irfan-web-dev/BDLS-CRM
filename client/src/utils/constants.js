@@ -62,3 +62,19 @@ export const ROLES = {
   ADMIN: 'admin',
   STAFF: 'staff',
 };
+
+export const LAHORE_AREAS = [
+  'Allama Iqbal Town', 'Askari', 'Bahria Town', 'Cantt',
+  'DHA Phase 1', 'DHA Phase 2', 'DHA Phase 3', 'DHA Phase 4',
+  'DHA Phase 5', 'DHA Phase 6', 'DHA Phase 7', 'DHA Phase 8',
+  'Faisal Town', 'Garden Town', 'Gulberg', 'Gulshan-e-Ravi',
+  'Iqbal Town', 'Johar Town', 'Jubilee Town', 'Lake City',
+  'Lahore Cantt', 'Model Town', 'Mughalpura', 'Muslim Town',
+  'Nishtar Colony', 'PCSIR Housing Society', 'Punjab Coop Housing Society',
+  'Raiwind Road', 'Sabzazar', 'Samanabad', 'Shalimar',
+  'Shahdara', 'Township', 'Wahdat Road', 'Wapda Town',
+  'Valencia Town', 'EME Society', 'Cavalry Ground',
+  'Bedian Road', 'Barki Road', 'Ferozpur Road',
+  'GT Road', 'Jail Road', 'Mall Road', 'Multan Road',
+  'Thokar Niaz Baig', 'Sheikhupura Road', 'Walton Road',
+].sort();

@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin, isAdminOrAbove } from '../../utils/roleUtils';
-import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES } from '../../utils/constants';
+import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, LAHORE_AREAS } from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
@@ -20,7 +20,41 @@ export default function InquiryEdit() {
   const [sources, setSources] = useState([]);
   const [tags, setTags] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [areaOptions, setAreaOptions] = useState(LAHORE_AREAS);
+  const [areaSearch, setAreaSearch] = useState('');
+  const [showAreaDropdown, setShowAreaDropdown] = useState(false);
+  const areaRef = useRef(null);
   const [form, setForm] = useState({});
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (areaRef.current && !areaRef.current.contains(e.target)) setShowAreaDropdown(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredAreas = areaOptions.filter(a => a.toLowerCase().includes(areaSearch.toLowerCase()));
+
+  function handleAreaSelect(area) {
+    setForm(prev => ({ ...prev, area }));
+    setAreaSearch(area);
+    setShowAreaDropdown(false);
+  }
+
+  function handleAreaInput(value) {
+    setAreaSearch(value);
+    setForm(prev => ({ ...prev, area: value }));
+    setShowAreaDropdown(true);
+  }
+
+  function handleAddArea() {
+    if (areaSearch.trim() && !areaOptions.some(a => a.toLowerCase() === areaSearch.trim().toLowerCase())) {
+      setAreaOptions(prev => [...prev, areaSearch.trim()].sort());
+    }
+    setForm(prev => ({ ...prev, area: areaSearch.trim() }));
+    setShowAreaDropdown(false);
+  }
 
   useEffect(() => { loadData(); }, [id]);
 
@@ -48,6 +82,7 @@ export default function InquiryEdit() {
         notes: inq.notes || '', tag_ids: inq.tags?.map(t => t.id) || [],
       });
 
+      setAreaSearch(inq.area || '');
       setCampuses(campRes.data);
       setClasses(classRes.data);
       setSources(srcRes.data);
@@ -117,10 +152,26 @@ export default function InquiryEdit() {
             <div><label className={labelClass}>Relationship *</label><select name="relationship" value={form.relationship} onChange={handleChange} className={inputClass}>{RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></div>
             <div><label className={labelClass}>Phone *</label><input name="parent_phone" value={form.parent_phone} onChange={handleChange} required className={inputClass} /></div>
             <div><label className={labelClass}>WhatsApp</label><input name="parent_whatsapp" value={form.parent_whatsapp} onChange={handleChange} className={inputClass} /></div>
-            <div><label className={labelClass}>Email</label><input name="parent_email" type="email" value={form.parent_email} onChange={handleChange} className={inputClass} /></div>
+            <div><label className={labelClass}>Email</label><input name="parent_email" value={form.parent_email} onChange={handleChange} className={inputClass} placeholder="Optional" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className={labelClass}>City</label><input name="city" value={form.city} onChange={handleChange} className={inputClass} /></div>
-              <div><label className={labelClass}>Area</label><input name="area" value={form.area} onChange={handleChange} className={inputClass} /></div>
+              <div ref={areaRef} className="relative">
+                <label className={labelClass}>Area</label>
+                <input value={areaSearch} onChange={(e) => handleAreaInput(e.target.value)} onFocus={() => setShowAreaDropdown(true)} className={inputClass} placeholder="Type to search or add..." />
+                {showAreaDropdown && (
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {filteredAreas.map(area => (
+                      <button key={area} type="button" onClick={() => handleAreaSelect(area)} className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 hover:text-primary-700">{area}</button>
+                    ))}
+                    {areaSearch.trim() && !areaOptions.some(a => a.toLowerCase() === areaSearch.trim().toLowerCase()) && (
+                      <button type="button" onClick={handleAddArea} className="w-full text-left px-3 py-2 text-sm text-primary-600 font-medium hover:bg-primary-50 border-t border-gray-100">+ Add "{areaSearch.trim()}"</button>
+                    )}
+                    {filteredAreas.length === 0 && !areaSearch.trim() && (
+                      <div className="px-3 py-2 text-sm text-gray-400">No areas found</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

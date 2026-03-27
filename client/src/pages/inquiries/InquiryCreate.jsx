@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin, isAdminOrAbove } from '../../utils/roleUtils';
-import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES } from '../../utils/constants';
+import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, LAHORE_AREAS } from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 
 export default function InquiryCreate() {
@@ -18,9 +18,44 @@ export default function InquiryCreate() {
   const [tags, setTags] = useState([]);
   const [staff, setStaff] = useState([]);
 
+  const [areaOptions, setAreaOptions] = useState(LAHORE_AREAS);
+  const [areaSearch, setAreaSearch] = useState('');
+  const [showAreaDropdown, setShowAreaDropdown] = useState(false);
+  const areaRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (areaRef.current && !areaRef.current.contains(e.target)) setShowAreaDropdown(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredAreas = areaOptions.filter(a => a.toLowerCase().includes(areaSearch.toLowerCase()));
+
+  function handleAreaSelect(area) {
+    setForm(prev => ({ ...prev, area }));
+    setAreaSearch(area);
+    setShowAreaDropdown(false);
+  }
+
+  function handleAreaInput(value) {
+    setAreaSearch(value);
+    setForm(prev => ({ ...prev, area: value }));
+    setShowAreaDropdown(true);
+  }
+
+  function handleAddArea() {
+    if (areaSearch.trim() && !areaOptions.some(a => a.toLowerCase() === areaSearch.trim().toLowerCase())) {
+      setAreaOptions(prev => [...prev, areaSearch.trim()].sort());
+    }
+    setForm(prev => ({ ...prev, area: areaSearch.trim() }));
+    setShowAreaDropdown(false);
+  }
+
   const [form, setForm] = useState({
     parent_name: '', relationship: 'father', parent_phone: '',
-    parent_whatsapp: '', parent_email: '', city: '', area: '',
+    parent_whatsapp: '', parent_email: '', city: 'Lahore', area: '',
     student_name: '', date_of_birth: '', gender: '',
     class_applying_id: '', current_school: '', special_needs: '',
     source_id: '', referral_parent_name: '', campus_id: user?.campus_id || '',
@@ -130,16 +165,41 @@ export default function InquiryCreate() {
             </div>
             <div>
               <label className={labelClass}>Email</label>
-              <input name="parent_email" type="email" value={form.parent_email} onChange={handleChange} className={inputClass} />
+              <input name="parent_email" value={form.parent_email} onChange={handleChange} className={inputClass} placeholder="Optional" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>City</label>
                 <input name="city" value={form.city} onChange={handleChange} className={inputClass} />
               </div>
-              <div>
+              <div ref={areaRef} className="relative">
                 <label className={labelClass}>Area</label>
-                <input name="area" value={form.area} onChange={handleChange} className={inputClass} />
+                <input
+                  value={areaSearch}
+                  onChange={(e) => handleAreaInput(e.target.value)}
+                  onFocus={() => setShowAreaDropdown(true)}
+                  className={inputClass}
+                  placeholder="Type to search or add..."
+                />
+                {showAreaDropdown && (
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {filteredAreas.map(area => (
+                      <button key={area} type="button" onClick={() => handleAreaSelect(area)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 hover:text-primary-700">
+                        {area}
+                      </button>
+                    ))}
+                    {areaSearch.trim() && !areaOptions.some(a => a.toLowerCase() === areaSearch.trim().toLowerCase()) && (
+                      <button type="button" onClick={handleAddArea}
+                        className="w-full text-left px-3 py-2 text-sm text-primary-600 font-medium hover:bg-primary-50 border-t border-gray-100">
+                        + Add "{areaSearch.trim()}"
+                      </button>
+                    )}
+                    {filteredAreas.length === 0 && !areaSearch.trim() && (
+                      <div className="px-3 py-2 text-sm text-gray-400">No areas found</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
