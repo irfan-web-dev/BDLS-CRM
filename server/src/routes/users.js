@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import { User, Campus, AuditLog } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { authorize, scopeToCampus } from '../middleware/authorize.js';
+import sharedClient from '../services/shared-client.js';
+import { incrementalSync } from '../services/sync.js';
 
 const router = Router();
 
@@ -80,7 +82,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/users
+// POST /api/users - Create user via Shared API
 router.post('/', async (req, res) => {
   try {
     const { name, email, phone, password, role, campus_id } = req.body;
@@ -93,35 +95,42 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Only super admin can create super admin accounts' });
     }
 
-    const existing = await User.findOne({ where: { email } });
-    if (existing) {
-      return res.status(400).json({ error: 'Email already in use' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
     const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : campus_id;
 
-    const user = await User.create({
+    // Map CRM role to shared person_type
+    const typeMap = {
+      super_admin: 'super_admin',
+      admin: 'campus_admin',
+      staff: 'staff',
+      teacher: 'teacher',
+    };
+
+    // Create in Shared API (source of truth)
+    const person = await sharedClient.createPerson({
       name,
       email,
       phone,
-      password: hashedPassword,
-      role: role || 'staff',
+      password,
+      person_type: typeMap[role] || 'staff',
       campus_id: assignedCampus,
     });
+
+    // Sync cache to get the new user locally
+    await incrementalSync();
 
     await AuditLog.create({
       user_id: req.user.id,
       action: 'user.create',
       entity_type: 'user',
-      entity_id: user.id,
+      entity_id: person.id,
       new_values: { name, email, role: role || 'staff', campus_id: assignedCampus },
     });
 
-    const userData = user.toJSON();
-    delete userData.password;
-    res.status(201).json(userData);
+    res.status(201).json(person);
   } catch (error) {
+    if (error.status === 409) {
+      return res.status(400).json({ error: 'Email already in use' });
+    }
     console.error('Create user error:', error);
     res.status(500).json({ error: 'Server error' });
   }

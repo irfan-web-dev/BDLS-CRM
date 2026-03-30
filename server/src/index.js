@@ -4,6 +4,7 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import { sequelize } from './models/index.js';
+import { fullSync, startSyncSchedule } from './services/sync.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -31,24 +32,26 @@ app.use('/api/settings', settingRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', service: 'crm', timestamp: new Date().toISOString() });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 async function start() {
   try {
     await sequelize.authenticate();
-    console.log('Database connected.');
+    console.log('CRM Database connected.');
 
-    await sequelize.sync({ alter: true });
-    console.log('Database synced.');
+    // Sync cache from Shared API (non-blocking - CRM works even if sync fails)
+    fullSync().then(() => {
+      startSyncSchedule(5 * 60 * 1000); // Sync every 5 minutes
+    });
 
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.log(`CRM Server running on port ${PORT}`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('Failed to start CRM server:', error);
     process.exit(1);
   }
 }

@@ -11,8 +11,12 @@ async function seed() {
     await sequelize.authenticate();
     console.log('Connected to database.');
 
-    await sequelize.sync({ force: true });
-    console.log('Tables created.');
+    // Check if already seeded
+    const campusCount = await Campus.count();
+    if (campusCount > 0) {
+      console.log('CRM data already seeded, skipping.');
+      process.exit(0);
+    }
 
     // Create campuses
     const mainCampus = await Campus.create({

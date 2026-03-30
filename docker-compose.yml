@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: always
     environment:
-      POSTGRES_DB: school_crm
+      POSTGRES_DB: bab_e_arqam_lms
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
@@ -16,7 +16,7 @@ services:
       timeout: 5s
       retries: 5
 
-  server:
+  crm-server:
     build: ./server
     restart: always
     depends_on:
@@ -25,7 +25,7 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      DB_NAME: school_crm
+      DB_NAME: bab_e_arqam_lms
       DB_USER: postgres
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       JWT_SECRET: ${JWT_SECRET:-school-crm-secret-key-change-in-production}
@@ -33,11 +33,11 @@ services:
     ports:
       - "5001:5001"
 
-  client:
+  crm-client:
     build: ./client
     restart: always
     depends_on:
-      - server
+      - crm-server
     ports:
       - "3050:80"
 

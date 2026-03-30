@@ -1,12 +1,11 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { User, Campus, AuditLog } from '../models/index.js';
+import { AuditLog } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
+import sharedClient from '../services/shared-client.js';
 
 const router = Router();
 
-// POST /api/auth/login
+// POST /api/auth/login - Login via Shared API
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -15,42 +14,42 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = await User.findOne({
-      where: { email, deleted_at: null },
-      include: [{ model: Campus, as: 'campus' }],
-    });
+    const result = await sharedClient.login({ email, password });
 
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+    // Only allow admin/staff/teacher roles to log into CRM
+    const allowedTypes = ['super_admin', 'campus_admin', 'staff', 'branch_staff', 'teacher'];
+    if (!allowedTypes.includes(result.user.person_type)) {
+      return res.status(403).json({ error: 'Access denied. Students cannot access CRM.' });
     }
 
-    if (!user.is_active) {
-      return res.status(401).json({ error: 'Account is deactivated' });
-    }
+    // Map person_type to CRM role for frontend compatibility
+    const roleMap = {
+      super_admin: 'super_admin',
+      campus_admin: 'admin',
+      staff: 'staff',
+      branch_staff: 'staff',
+      teacher: 'teacher',
+    };
 
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    await user.update({ last_login_at: new Date() });
+    const userData = {
+      ...result.user,
+      role: roleMap[result.user.person_type] || 'staff',
+    };
 
     await AuditLog.create({
-      user_id: user.id,
+      user_id: result.user.id,
       action: 'user.login',
       entity_type: 'user',
-      entity_id: user.id,
+      entity_id: result.user.id,
       ip_address: req.ip,
       user_agent: req.get('user-agent'),
-    });
+    }).catch(() => {});
 
-    const userData = user.toJSON();
-    delete userData.password;
-
-    res.json({ token, user: userData });
+    res.json({ token: result.token, user: userData });
   } catch (error) {
+    if (error.status === 401) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
     console.error('Login error:', error);
     res.status(500).json({ error: 'Server error' });
   }
@@ -65,9 +64,10 @@ router.get('/me', authenticate, async (req, res) => {
   }
 });
 
-// PUT /api/auth/change-password
+// PUT /api/auth/change-password - Proxy to Shared API
 router.put('/change-password', authenticate, async (req, res) => {
   try {
+    const token = req.headers.authorization.split(' ')[1];
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
@@ -78,22 +78,27 @@ router.put('/change-password', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'New password must be at least 6 characters' });
     }
 
-    const user = await User.findByPk(req.user.id);
-    const validPassword = await bcrypt.compare(currentPassword, user.password);
+    const SHARED_API = process.env.SHARED_API_URL || 'http://localhost:5002';
+    const response = await fetch(`${SHARED_API}/api/v1/auth/change-password`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
 
-    if (!validPassword) {
-      return res.status(400).json({ error: 'Current password is incorrect' });
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json(data);
     }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await user.update({ password: hashedPassword });
 
     await AuditLog.create({
       user_id: req.user.id,
       action: 'user.change_password',
       entity_type: 'user',
       entity_id: req.user.id,
-    });
+    }).catch(() => {});
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
