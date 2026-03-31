@@ -16,10 +16,10 @@ router.post('/login', async (req, res) => {
 
     const result = await sharedClient.login({ email, password });
 
-    // Only allow admin/staff/teacher roles to log into CRM
-    const allowedTypes = ['super_admin', 'campus_admin', 'staff', 'branch_staff', 'teacher'];
+    // Only allow admin/staff roles to log into CRM
+    const allowedTypes = ['super_admin', 'campus_admin', 'staff', 'branch_staff'];
     if (!allowedTypes.includes(result.user.person_type)) {
-      return res.status(403).json({ error: 'Access denied. Students cannot access CRM.' });
+      return res.status(403).json({ error: 'Access denied. Only admin and staff can access CRM.' });
     }
 
     // Map person_type to CRM role for frontend compatibility
@@ -28,7 +28,6 @@ router.post('/login', async (req, res) => {
       campus_admin: 'admin',
       staff: 'staff',
       branch_staff: 'staff',
-      teacher: 'teacher',
     };
 
     const userData = {

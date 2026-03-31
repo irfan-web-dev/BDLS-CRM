@@ -169,6 +169,105 @@ router.get('/staff-performance', authorize('super_admin', 'admin'), async (req, 
   }
 });
 
+// GET /api/dashboard/communication-stats
+router.get('/communication-stats', async (req, res) => {
+  try {
+    const where = { deleted_at: null, ...req.campusScope };
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+
+    // Total active inquiries (not closed)
+    const activeStatuses = ['new', 'contacted_attempt_1', 'contacted_connected', 'follow_up_scheduled', 'visit_scheduled', 'visit_completed', 'form_issued', 'form_submitted', 'documents_pending'];
+    const totalActive = await Inquiry.count({ where: { ...where, status: { [Op.in]: activeStatuses } } });
+
+    // Contacted (have at least 1 follow-up)
+    const contacted = await Inquiry.count({
+      where: { ...where, status: { [Op.in]: activeStatuses }, last_contact_date: { [Op.ne]: null } },
+    });
+
+    // Not contacted (no follow-up yet)
+    const notContacted = await Inquiry.count({
+      where: {
+        ...where,
+        status: { [Op.in]: activeStatuses },
+        [Op.or]: [{ last_contact_date: null }],
+      },
+    });
+
+    // Contact rate
+    const contactRate = totalActive > 0 ? ((contacted / totalActive) * 100).toFixed(1) : 0;
+
+    // Follow-ups this month
+    const followUpsThisMonth = await InquiryFollowUp.count({
+      where: { created_at: { [Op.gte]: startOfMonth } },
+    });
+
+    // Follow-ups last month
+    const followUpsLastMonth = await InquiryFollowUp.count({
+      where: { created_at: { [Op.gte]: startOfLastMonth, [Op.lte]: endOfLastMonth } },
+    });
+
+    // By communication type this month
+    const byType = await InquiryFollowUp.findAll({
+      where: { created_at: { [Op.gte]: startOfMonth } },
+      attributes: ['type', [sequelize.fn('COUNT', sequelize.col('id')), 'count']],
+      group: ['type'],
+      raw: true,
+    });
+
+    // Daily follow-ups for last 14 days
+    const dailyData = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayStr = d.toISOString().split('T')[0];
+      const dayStart = new Date(dayStr);
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const count = await InquiryFollowUp.count({
+        where: { follow_up_date: dayStr },
+      });
+      dailyData.push({
+        date: dayStr,
+        day: d.toLocaleDateString('en', { weekday: 'short', day: 'numeric' }),
+        count,
+      });
+    }
+
+    // Staff communication breakdown
+    const staffComms = await InquiryFollowUp.findAll({
+      where: { created_at: { [Op.gte]: startOfMonth } },
+      attributes: ['staff_id', [sequelize.fn('COUNT', sequelize.col('InquiryFollowUp.id')), 'count']],
+      include: [{ model: User, as: 'staff', attributes: ['name'] }],
+      group: ['staff_id', 'staff.id', 'staff.name'],
+      raw: true,
+    });
+
+    res.json({
+      totalActive,
+      contacted,
+      notContacted,
+      contactRate: parseFloat(contactRate),
+      followUpsThisMonth,
+      followUpsLastMonth,
+      byType: byType.map(t => ({
+        type: t.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        count: parseInt(t.count),
+      })),
+      dailyData,
+      staffComms: staffComms.map(s => ({
+        name: s['staff.name'] || 'Unassigned',
+        count: parseInt(s.count),
+      })),
+    });
+  } catch (error) {
+    console.error('Communication stats error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/dashboard/recent-activity
 router.get('/recent-activity', async (req, res) => {
   try {

@@ -82,6 +82,38 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req, res) => {
   }
 });
 
+// DELETE /api/classes/:id (soft delete)
+router.delete('/:id', authorize('super_admin', 'admin'), async (req, res) => {
+  try {
+    const classLevel = await ClassLevel.findByPk(req.params.id);
+    if (!classLevel) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    await classLevel.update({ is_active: false });
+    res.json({ message: 'Class deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /api/classes/:classId/sections/:id (soft delete)
+router.delete('/:classId/sections/:id', authorize('super_admin', 'admin'), async (req, res) => {
+  try {
+    const section = await Section.findOne({
+      where: { id: req.params.id, class_level_id: req.params.classId },
+    });
+    if (!section) {
+      return res.status(404).json({ error: 'Section not found' });
+    }
+
+    await section.update({ is_active: false });
+    res.json({ message: 'Section deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/classes/:id/sections
 router.get('/:id/sections', async (req, res) => {
   try {

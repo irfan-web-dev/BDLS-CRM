@@ -12,6 +12,10 @@ const InquiryTag = sequelize.define('InquiryTag', {
     allowNull: false,
     unique: true,
   },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+  },
 }, {
   tableName: 'inquiry_tags',
   underscored: true,

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2 } from 'lucide-react';
+import { Plus, Edit2, Trash2 } from 'lucide-react';
 import api from '../../api';
 import Modal from '../../components/ui/Modal';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function SourceSettings() {
@@ -11,6 +12,7 @@ export default function SourceSettings() {
   const [editing, setEditing] = useState(null);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -32,6 +34,14 @@ export default function SourceSettings() {
     } finally { setSaving(false); }
   }
 
+  async function handleDelete() {
+    try {
+      await api.delete(`/settings/inquiry-sources/${deleteTarget.id}`);
+      load();
+    } catch (err) { console.error(err); }
+    setDeleteTarget(null);
+  }
+
   if (loading) return <LoadingSpinner />;
 
   const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none';
@@ -46,7 +56,10 @@ export default function SourceSettings() {
         {sources.map(s => (
           <div key={s.id} className="flex items-center justify-between p-4">
             <span className="text-sm font-medium text-gray-900">{s.name}</span>
-            <button onClick={() => openEdit(s)} className="rounded p-1.5 hover:bg-gray-100 text-gray-400"><Edit2 className="h-4 w-4" /></button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => openEdit(s)} className="rounded p-1.5 hover:bg-gray-100 text-gray-400"><Edit2 className="h-4 w-4" /></button>
+              <button onClick={() => setDeleteTarget(s)} className="rounded p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
+            </div>
           </div>
         ))}
       </div>
@@ -59,6 +72,16 @@ export default function SourceSettings() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+        title="Delete Source"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"?`}
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Eye, Edit2 } from 'lucide-react';
+import { Plus, Edit2 } from 'lucide-react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminOrAbove, isSuperAdmin } from '../../utils/roleUtils';
@@ -61,7 +61,15 @@ export default function InquiryList() {
   async function loadInquiries() {
     setLoading(true);
     try {
-      const params = { page, limit: 20, search, ...filters };
+      const params = { page, limit: 20, search };
+      // Convert array filters to comma-separated strings
+      Object.entries(filters).forEach(([k, v]) => {
+        if (Array.isArray(v) && v.length > 0) {
+          params[k] = v.join(',');
+        } else if (v && !Array.isArray(v)) {
+          params[k] = v;
+        }
+      });
       Object.keys(params).forEach(k => {
         if (!params[k]) delete params[k];
       });
@@ -93,6 +101,12 @@ export default function InquiryList() {
     filterConfig.push({ key: 'assigned_staff_id', label: 'All Staff', options: staff.map(s => ({ value: s.id, label: s.name })) });
   }
 
+  function handleRowClick(e, id) {
+    // Don't navigate if user clicked on the edit button
+    if (e.target.closest('[data-action]')) return;
+    navigate(`/inquiries/${id}`);
+  }
+
   return (
     <div>
       <PageHeader
@@ -104,18 +118,19 @@ export default function InquiryList() {
             className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 transition-colors"
           >
             <Plus className="h-4 w-4" />
-            New Inquiry
+            <span className="hidden sm:inline">New Inquiry</span>
+            <span className="sm:hidden">New</span>
           </Link>
         }
       />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100">
         {/* Search & Filters */}
-        <div className="p-4 space-y-3 border-b border-gray-100">
+        <div className="p-3 sm:p-4 space-y-3 border-b border-gray-100">
           <SearchInput
             value={search}
             onChange={(val) => { setSearch(val); setPage(1); }}
-            placeholder="Search by student name, parent name, or phone..."
+            placeholder="Search student, parent, or phone..."
           />
           <FilterBar
             filters={filterConfig}
@@ -125,7 +140,7 @@ export default function InquiryList() {
           />
         </div>
 
-        {/* Table */}
+        {/* Content */}
         {loading ? (
           <LoadingSpinner />
         ) : inquiries.length === 0 ? (
@@ -139,68 +154,108 @@ export default function InquiryList() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
-                  <th className="px-4 py-3">Student</th>
-                  <th className="px-4 py-3">Parent</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Class</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Priority</th>
-                  <th className="px-4 py-3">Follow-up</th>
-                  <th className="px-4 py-3">Assigned</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {inquiries.map(inq => (
-                  <tr key={inq.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <Link to={`/inquiries/${inq.id}`} className="font-medium text-gray-900 hover:text-primary-600">
-                        {inq.student_name}
-                      </Link>
-                      <p className="text-xs text-gray-400">{formatDate(inq.inquiry_date)}</p>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
-                    <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>
-                    <td className="px-4 py-3 text-gray-600">{inq.classApplying?.name}</td>
-                    <td className="px-4 py-3"><InquiryStatusBadge status={inq.status} /></td>
-                    <td className="px-4 py-3"><PriorityBadge priority={inq.priority} /></td>
-                    <td className="px-4 py-3">
-                      {inq.next_follow_up_date ? (
-                        <span className={`text-xs ${isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
-                          {formatDate(inq.next_follow_up_date)}
+          <>
+            {/* Mobile: Card Layout */}
+            <div className="lg:hidden divide-y divide-gray-100">
+              {inquiries.map(inq => (
+                <div
+                  key={inq.id}
+                  onClick={(e) => handleRowClick(e, inq.id)}
+                  className="p-4 active:bg-gray-50 cursor-pointer"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-gray-900 truncate">{inq.student_name}</p>
+                      <p className="text-sm text-gray-500 truncate">{inq.parent_name} &middot; {inq.parent_phone}</p>
+                    </div>
+                    <button
+                      data-action="edit"
+                      onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
+                      className="rounded p-1.5 hover:bg-gray-100 text-gray-400 flex-shrink-0"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <InquiryStatusBadge status={inq.status} />
+                    <PriorityBadge priority={inq.priority} />
+                    {inq.classApplying && (
+                      <span className="text-xs text-gray-500 bg-gray-100 rounded px-2 py-0.5">{inq.classApplying.name}</span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+                    <span>{formatDate(inq.inquiry_date)}</span>
+                    <div className="flex items-center gap-3">
+                      {inq.next_follow_up_date && (
+                        <span className={isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : ''}>
+                          F/U: {formatDate(inq.next_follow_up_date)}
                         </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">-</span>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 text-sm">{inq.assignedStaff?.name || '-'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Link
-                          to={`/inquiries/${inq.id}`}
-                          className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                          title="View"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Link>
-                        <Link
-                          to={`/inquiries/${inq.id}/edit`}
+                      {inq.assignedStaff && <span>{inq.assignedStaff.name}</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: Table Layout */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Parent</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">Class</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Priority</th>
+                    <th className="px-4 py-3">Follow-up</th>
+                    <th className="px-4 py-3">Assigned</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {inquiries.map(inq => (
+                    <tr
+                      key={inq.id}
+                      onClick={(e) => handleRowClick(e, inq.id)}
+                      className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-gray-900">{inq.student_name}</span>
+                        <p className="text-xs text-gray-400">{formatDate(inq.inquiry_date)}</p>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
+                      <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>
+                      <td className="px-4 py-3 text-gray-600">{inq.classApplying?.name}</td>
+                      <td className="px-4 py-3"><InquiryStatusBadge status={inq.status} /></td>
+                      <td className="px-4 py-3"><PriorityBadge priority={inq.priority} /></td>
+                      <td className="px-4 py-3">
+                        {inq.next_follow_up_date ? (
+                          <span className={`text-xs ${isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                            {formatDate(inq.next_follow_up_date)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-sm">{inq.assignedStaff?.name || '-'}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          data-action="edit"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
                           className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
                           title="Edit"
                         >
                           <Edit2 className="h-4 w-4" />
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {/* Pagination */}

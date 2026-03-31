@@ -12,6 +12,9 @@ import InquiryCreate from './pages/inquiries/InquiryCreate';
 import InquiryDetail from './pages/inquiries/InquiryDetail';
 import InquiryEdit from './pages/inquiries/InquiryEdit';
 
+import Communications from './pages/Communications';
+import Reports from './pages/Reports';
+
 // Settings
 import SettingsLayout from './pages/settings/SettingsLayout';
 import CampusSettings from './pages/settings/CampusSettings';
@@ -52,8 +55,8 @@ export default function App() {
             <Route path="/students" element={<ComingSoon title="Students" />} />
             <Route path="/attendance" element={<ComingSoon title="Attendance" />} />
             <Route path="/homework" element={<ComingSoon title="Homework" />} />
-            <Route path="/communications" element={<ComingSoon title="Communications" />} />
-            <Route path="/reports" element={<ComingSoon title="Reports" />} />
+            <Route path="/communications" element={<Communications />} />
+            <Route path="/reports" element={<Reports />} />
 
             {/* Settings */}
             <Route path="/settings" element={

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2 } from 'lucide-react';
+import { Plus, Edit2, Trash2 } from 'lucide-react';
 import api from '../../api';
 import Modal from '../../components/ui/Modal';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
 export default function CampusSettings() {
@@ -11,6 +12,7 @@ export default function CampusSettings() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', address: '', phone: '' });
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => { load(); }, []);
 
@@ -23,6 +25,14 @@ export default function CampusSettings() {
 
   function openCreate() { setEditing(null); setForm({ name: '', address: '', phone: '' }); setModal(true); }
   function openEdit(c) { setEditing(c); setForm({ name: c.name, address: c.address || '', phone: c.phone || '' }); setModal(true); }
+
+  async function handleDelete() {
+    try {
+      await api.delete(`/campuses/${deleteTarget.id}`);
+      load();
+    } catch (err) { console.error(err); }
+    setDeleteTarget(null);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -59,9 +69,14 @@ export default function CampusSettings() {
                 <p className="font-medium text-gray-900">{c.name}</p>
                 <p className="text-xs text-gray-500">{[c.address, c.phone].filter(Boolean).join(' | ')}</p>
               </div>
-              <button onClick={() => openEdit(c)} className="rounded p-1.5 hover:bg-gray-100 text-gray-400">
-                <Edit2 className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button onClick={() => openEdit(c)} className="rounded p-1.5 hover:bg-gray-100 text-gray-400">
+                  <Edit2 className="h-4 w-4" />
+                </button>
+                <button onClick={() => setDeleteTarget(c)} className="rounded p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -78,6 +93,16 @@ export default function CampusSettings() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+        title="Delete Campus"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? This campus will be deactivated.`}
+        confirmLabel="Delete"
+        danger
+      />
     </div>
   );
 }

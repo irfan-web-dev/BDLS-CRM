@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   UserSearch, UserCheck, TrendingUp, Clock, AlertTriangle,
-  Phone, ArrowRight,
+  Phone, ArrowRight, MessageSquare, PhoneOff,
 } from 'lucide-react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { isAdminOrAbove } from '../utils/roleUtils';
@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [followUpStats, setFollowUpStats] = useState(null);
   const [reminders, setReminders] = useState(null);
   const [staffPerformance, setStaffPerformance] = useState(null);
+  const [commStats, setCommStats] = useState(null);
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,16 +33,18 @@ export default function Dashboard() {
 
   async function loadDashboard() {
     try {
-      const [admRes, fuRes, remRes, actRes] = await Promise.all([
+      const [admRes, fuRes, remRes, actRes, commRes] = await Promise.all([
         api.get('/dashboard/admission-stats'),
         api.get('/dashboard/follow-up-stats'),
         api.get('/inquiries/reminders'),
         api.get('/dashboard/recent-activity'),
+        api.get('/dashboard/communication-stats'),
       ]);
       setAdmissionStats(admRes.data);
       setFollowUpStats(fuRes.data);
       setReminders(remRes.data);
       setRecentActivity(actRes.data);
+      setCommStats(commRes.data);
 
       if (isAdminOrAbove(user)) {
         const spRes = await api.get('/dashboard/staff-performance');
@@ -157,6 +160,102 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Communication Reports */}
+      {commStats && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatCard
+              title="Contacted"
+              value={commStats.contacted}
+              icon={Phone}
+              color="green"
+              subtitle={`${commStats.contactRate}% contact rate`}
+            />
+            <StatCard
+              title="Not Contacted"
+              value={commStats.notContacted}
+              icon={PhoneOff}
+              color="red"
+              subtitle="Need attention"
+            />
+            <StatCard
+              title="Communications"
+              value={commStats.followUpsThisMonth}
+              icon={MessageSquare}
+              color="blue"
+              subtitle={`Last month: ${commStats.followUpsLastMonth}`}
+            />
+            <StatCard
+              title="Active Inquiries"
+              value={commStats.totalActive}
+              icon={UserSearch}
+              color="purple"
+              subtitle="In pipeline"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            {/* Daily Communication Trend */}
+            <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">Communication Trend (14 Days)</h3>
+              {commStats.dailyData?.length > 0 ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={commStats.dailyData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Bar dataKey="count" name="Follow-ups" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-8">No data</p>
+              )}
+            </div>
+
+            {/* By Type + Staff Breakdown */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">By Channel</h3>
+              {commStats.byType?.length > 0 ? (
+                <div className="space-y-2 mb-6">
+                  {commStats.byType.sort((a, b) => b.count - a.count).map((t, i) => {
+                    const max = Math.max(...commStats.byType.map(x => x.count));
+                    return (
+                      <div key={t.type} className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 w-28 truncate">{t.type}</span>
+                        <div className="flex-1 bg-gray-100 rounded-full h-4">
+                          <div
+                            className="h-4 rounded-full bg-primary-500"
+                            style={{ width: `${(t.count / max) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium text-gray-700 w-6 text-right">{t.count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-400 text-center py-4">No data</p>
+              )}
+
+              {commStats.staffComms?.length > 0 && (
+                <>
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2 mt-2">By Staff</h4>
+                  <div className="space-y-1.5">
+                    {commStats.staffComms.sort((a, b) => b.count - a.count).map(s => (
+                      <div key={s.name} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">{s.name}</span>
+                        <span className="font-medium text-gray-900">{s.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Follow-up Reminders */}

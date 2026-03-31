@@ -53,11 +53,14 @@ export default function InquiryCreate() {
     setShowAreaDropdown(false);
   }
 
+  const today = new Date().toISOString().split('T')[0];
+
   const [form, setForm] = useState({
     parent_name: '', relationship: 'father', parent_phone: '',
     parent_whatsapp: '', parent_email: '', city: 'Lahore', area: '',
     student_name: '', date_of_birth: '', gender: '',
     class_applying_id: '', current_school: '', special_needs: '',
+    inquiry_date: today,
     source_id: '', referral_parent_name: '', campus_id: user?.campus_id || '',
     session_preference: '', assigned_staff_id: '', priority: 'normal',
     notes: '', tag_ids: [],
@@ -246,6 +249,10 @@ export default function InquiryCreate() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <h3 className="text-base font-semibold text-gray-900 mb-4">Inquiry Details</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Inquiry Date *</label>
+              <input name="inquiry_date" type="date" value={form.inquiry_date} onChange={handleChange} max={today} required className={inputClass} />
+            </div>
             <div>
               <label className={labelClass}>How They Heard About Us</label>
               <select name="source_id" value={form.source_id} onChange={handleChange} className={inputClass}>

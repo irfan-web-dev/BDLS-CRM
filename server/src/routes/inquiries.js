@@ -23,17 +23,13 @@ router.get('/', async (req, res) => {
 
     const where = { deleted_at: null, ...req.campusScope };
 
-    // Staff only see their assigned inquiries
-    if (req.user.role === 'staff') {
-      where.assigned_staff_id = req.user.id;
-    }
-
-    if (status) where.status = status;
-    if (campus_id && req.user.role === 'super_admin') where.campus_id = campus_id;
-    if (class_id) where.class_applying_id = class_id;
-    if (source_id) where.source_id = source_id;
-    if (assigned_staff_id) where.assigned_staff_id = assigned_staff_id;
-    if (priority) where.priority = priority;
+    // Support multi-value filters (comma-separated)
+    if (status) where.status = status.includes(',') ? { [Op.in]: status.split(',') } : status;
+    if (campus_id && req.user.role === 'super_admin') where.campus_id = campus_id.includes?.(',') ? { [Op.in]: campus_id.split(',') } : campus_id;
+    if (class_id) where.class_applying_id = String(class_id).includes(',') ? { [Op.in]: class_id.split(',') } : class_id;
+    if (source_id) where.source_id = String(source_id).includes(',') ? { [Op.in]: source_id.split(',') } : source_id;
+    if (assigned_staff_id) where.assigned_staff_id = String(assigned_staff_id).includes(',') ? { [Op.in]: assigned_staff_id.split(',') } : assigned_staff_id;
+    if (priority) where.priority = priority.includes(',') ? { [Op.in]: priority.split(',') } : priority;
 
     if (date_from || date_to) {
       where.inquiry_date = {};
@@ -95,9 +91,6 @@ router.get('/', async (req, res) => {
 router.get('/pipeline', async (req, res) => {
   try {
     const where = { deleted_at: null, ...req.campusScope };
-    if (req.user.role === 'staff') {
-      where.assigned_staff_id = req.user.id;
-    }
 
     const pipeline = await Inquiry.findAll({
       where,
@@ -125,10 +118,6 @@ router.get('/overdue', async (req, res) => {
       status: { [Op.notIn]: ['admitted', 'not_interested', 'lost', 'no_response'] },
     };
 
-    if (req.user.role === 'staff') {
-      where.assigned_staff_id = req.user.id;
-    }
-
     const inquiries = await Inquiry.findAll({
       where,
       include: [
@@ -154,10 +143,6 @@ router.get('/reminders', async (req, res) => {
       ...req.campusScope,
       status: { [Op.notIn]: ['admitted', 'not_interested', 'lost', 'no_response'] },
     };
-
-    if (req.user.role === 'staff') {
-      baseWhere.assigned_staff_id = req.user.id;
-    }
 
     const include = [
       { model: User, as: 'assignedStaff', attributes: ['id', 'name'] },
@@ -220,11 +205,6 @@ router.get('/:id', async (req, res) => {
 
     if (!inquiry) {
       return res.status(404).json({ error: 'Inquiry not found' });
-    }
-
-    // Staff can only view their assigned inquiries
-    if (req.user.role === 'staff' && inquiry.assigned_staff_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
     }
 
     res.json(inquiry);
@@ -302,10 +282,6 @@ router.put('/:id', async (req, res) => {
     const inquiry = await Inquiry.findOne({ where: { id: req.params.id, deleted_at: null } });
     if (!inquiry) {
       return res.status(404).json({ error: 'Inquiry not found' });
-    }
-
-    if (req.user.role === 'staff' && inquiry.assigned_staff_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
     }
 
     const oldValues = inquiry.toJSON();

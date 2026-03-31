@@ -59,6 +59,21 @@ router.put('/inquiry-sources/:id', authorize('super_admin', 'admin'), async (req
   }
 });
 
+// DELETE /api/settings/inquiry-sources/:id (soft delete)
+router.delete('/inquiry-sources/:id', authorize('super_admin', 'admin'), async (req, res) => {
+  try {
+    const source = await InquirySource.findByPk(req.params.id);
+    if (!source) {
+      return res.status(404).json({ error: 'Source not found' });
+    }
+
+    await source.update({ is_active: false });
+    res.json({ message: 'Source deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // --- Inquiry Tags ---
 
 // GET /api/settings/inquiry-tags
@@ -99,10 +114,28 @@ router.put('/inquiry-tags/:id', authorize('super_admin', 'admin'), async (req, r
       return res.status(404).json({ error: 'Tag not found' });
     }
 
-    const { name } = req.body;
-    await tag.update({ name: name || tag.name });
+    const { name, is_active } = req.body;
+    await tag.update({
+      name: name || tag.name,
+      is_active: is_active !== undefined ? is_active : tag.is_active,
+    });
 
     res.json(tag);
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /api/settings/inquiry-tags/:id (soft delete)
+router.delete('/inquiry-tags/:id', authorize('super_admin', 'admin'), async (req, res) => {
+  try {
+    const tag = await InquiryTag.findByPk(req.params.id);
+    if (!tag) {
+      return res.status(404).json({ error: 'Tag not found' });
+    }
+
+    await tag.update({ is_active: false });
+    res.json({ message: 'Tag deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
