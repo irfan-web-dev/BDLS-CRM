@@ -4,11 +4,11 @@ import { Download, Phone, MessageSquare, Mail, Users, PhoneIncoming, PhoneOutgoi
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
-import { isAdminOrAbove } from '../utils/roleUtils';
+import { isSuperAdmin } from '../utils/roleUtils';
 import { formatDate } from '../utils/helpers';
 import PageHeader from '../components/ui/PageHeader';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { InquiryStatusBadge } from '../components/ui/StatusBadge';
+import CampusTypeTabs from '../components/ui/CampusTypeTabs';
 
 const TYPE_ICONS = {
   outgoing_call: PhoneOutgoing,
@@ -32,22 +32,60 @@ const TYPE_COLORS = {
 
 const PIE_COLORS = ['#3b82f6', '#22c55e', '#25d366', '#8b5cf6', '#f59e0b', '#ef4444', '#6b7280'];
 
+function normalizeCommStats(data) {
+  const byType = Array.isArray(data?.byType)
+    ? data.byType.map(item => ({
+      type: item?.type ? String(item.type) : 'Other',
+      count: Number(item?.count) || 0,
+    }))
+    : [];
+
+  const dailyData = Array.isArray(data?.dailyData)
+    ? data.dailyData.map(item => ({
+      ...item,
+      day: item?.day || '',
+      count: Number(item?.count) || 0,
+    }))
+    : [];
+
+  const staffComms = Array.isArray(data?.staffComms)
+    ? data.staffComms.map(item => ({
+      name: item?.name || 'Unassigned',
+      count: Number(item?.count) || 0,
+    }))
+    : [];
+
+  return {
+    contacted: Number(data?.contacted) || 0,
+    contactRate: Number(data?.contactRate) || 0,
+    notContacted: Number(data?.notContacted) || 0,
+    followUpsThisMonth: Number(data?.followUpsThisMonth) || 0,
+    followUpsLastMonth: Number(data?.followUpsLastMonth) || 0,
+    totalActive: Number(data?.totalActive) || 0,
+    byType,
+    dailyData,
+    staffComms,
+  };
+}
+
 export default function Communications() {
   const { user } = useAuth();
   const [commStats, setCommStats] = useState(null);
   const [followUps, setFollowUps] = useState([]);
-  const [pagination, setPagination] = useState({});
   const [page, setPage] = useState(1);
   const [typeFilter, setTypeFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [campusType, setCampusType] = useState(user?.campus?.campus_type || 'school');
 
-  useEffect(() => { loadStats(); }, []);
-  useEffect(() => { loadFollowUps(); }, [page, typeFilter]);
+  useEffect(() => { loadStats(); }, [campusType]);
+  useEffect(() => { loadFollowUps(); }, [page, typeFilter, campusType]);
+  useEffect(() => { setPage(1); }, [campusType]);
 
   async function loadStats() {
     try {
-      const res = await api.get('/dashboard/communication-stats');
-      setCommStats(res.data);
+      const params = isSuperAdmin(user) ? { campus_type: campusType } : {};
+      const res = await api.get('/dashboard/communication-stats', { params });
+      setCommStats(normalizeCommStats(res.data));
     } catch (err) { console.error(err); }
   }
 
@@ -56,9 +94,10 @@ export default function Communications() {
     try {
       const params = { page, limit: 15 };
       if (typeFilter) params.type = typeFilter;
+      if (isSuperAdmin(user)) params.campus_type = campusType;
       const res = await api.get('/follow-ups', { params });
-      setFollowUps(res.data.followUps || res.data);
-      if (res.data.pagination) setPagination(res.data.pagination);
+      const payload = res.data?.followUps ?? res.data;
+      setFollowUps(Array.isArray(payload) ? payload : []);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   }
@@ -88,6 +127,9 @@ export default function Communications() {
   }
 
   const typeLabel = (t) => t?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const byTypeData = Array.isArray(commStats?.byType) ? commStats.byType : [];
+  const sortedByType = [...byTypeData].sort((a, b) => b.count - a.count);
+  const dailyData = Array.isArray(commStats?.dailyData) ? commStats.dailyData : [];
 
   return (
     <div>
@@ -100,6 +142,10 @@ export default function Communications() {
           </button>
         }
       />
+
+      {isSuperAdmin(user) && (
+        <CampusTypeTabs value={campusType} onChange={setCampusType} className="mb-4" />
+      )}
 
       {/* Stats Cards */}
       {commStats && (
@@ -133,7 +179,7 @@ export default function Communications() {
           <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-4">Daily Communications (14 Days)</h3>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={commStats.dailyData}>
+              <BarChart data={dailyData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="day" tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
@@ -144,19 +190,19 @@ export default function Communications() {
           </div>
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
             <h3 className="text-sm font-semibold text-gray-900 mb-4">By Channel</h3>
-            {commStats.byType?.length > 0 && (
+            {byTypeData.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={160}>
                   <PieChart>
-                    <Pie data={commStats.byType} dataKey="count" nameKey="type" cx="50%" cy="50%" outerRadius={60} innerRadius={35}>
-                      {commStats.byType.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    <Pie data={byTypeData} dataKey="count" nameKey="type" cx="50%" cy="50%" outerRadius={60} innerRadius={35}>
+                      {byTypeData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                     </Pie>
                     <Tooltip />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-1 mt-2">
-                  {commStats.byType.sort((a, b) => b.count - a.count).map((t, i) => (
-                    <div key={t.type} className="flex items-center justify-between text-xs">
+                  {sortedByType.map((t, i) => (
+                    <div key={`${t.type}-${i}`} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
                         <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
                         <span className="text-gray-600">{t.type}</span>
@@ -166,6 +212,8 @@ export default function Communications() {
                   ))}
                 </div>
               </>
+            ) : (
+              <p className="text-sm text-gray-400 text-center py-8">No channel activity yet</p>
             )}
           </div>
         </div>

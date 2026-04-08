@@ -141,6 +141,8 @@ export default function InquiryDetail() {
 }
 
 function OverviewTab({ inquiry }) {
+  const isCollegeInquiry = inquiry?.campus?.campus_type === 'college';
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Parent Info */}
@@ -162,8 +164,18 @@ function OverviewTab({ inquiry }) {
           <InfoRow label="Name" value={inquiry.student_name} />
           {inquiry.date_of_birth && <InfoRow icon={Calendar} label="Date of Birth" value={formatDate(inquiry.date_of_birth)} />}
           {inquiry.gender && <InfoRow label="Gender" value={inquiry.gender} />}
-          <InfoRow label="Applying For" value={inquiry.classApplying?.name} />
-          {inquiry.current_school && <InfoRow label="Current School" value={inquiry.current_school} />}
+          <InfoRow label={isCollegeInquiry ? 'Discipline' : 'Applying For'} value={inquiry.classApplying?.name} />
+          {inquiry.student_phone && <InfoRow label="Student Phone" value={inquiry.student_phone} />}
+          {isCollegeInquiry ? (
+            <>
+              {inquiry.previous_institute && <InfoRow label="Previous Institute" value={inquiry.previous_institute} />}
+              {(inquiry.previous_marks_obtained !== null && inquiry.previous_marks_obtained !== undefined) && <InfoRow label="Marks Obtained" value={inquiry.previous_marks_obtained} />}
+              {(inquiry.previous_total_marks !== null && inquiry.previous_total_marks !== undefined) && <InfoRow label="Total Marks" value={inquiry.previous_total_marks} />}
+              {inquiry.previous_major_subjects && <InfoRow label="Major Subjects" value={inquiry.previous_major_subjects} />}
+            </>
+          ) : (
+            inquiry.current_school && <InfoRow label="Current School" value={inquiry.current_school} />
+          )}
           {inquiry.special_needs && <InfoRow label="Special Needs" value={inquiry.special_needs} />}
         </div>
       </div>
@@ -176,6 +188,8 @@ function OverviewTab({ inquiry }) {
           <InfoRow label="Source" value={inquiry.source?.name || '-'} />
           {inquiry.referral_parent_name && <InfoRow label="Referred By" value={inquiry.referral_parent_name} />}
           <InfoRow label="Campus" value={inquiry.campus?.name} />
+          {isCollegeInquiry && inquiry.package_name && <InfoRow label="Package" value={inquiry.package_name} />}
+          {isCollegeInquiry && (inquiry.package_amount !== null && inquiry.package_amount !== undefined) && <InfoRow label="Package Amount" value={inquiry.package_amount} />}
           {inquiry.session_preference && <InfoRow label="Session" value={inquiry.session_preference} />}
           <InfoRow label="Assigned To" value={inquiry.assignedStaff?.name || 'Unassigned'} />
           <div className="flex items-center justify-between">

@@ -51,11 +51,31 @@ const Inquiry = sequelize.define('Inquiry', {
     type: DataTypes.ENUM('male', 'female', 'other'),
     allowNull: true,
   },
+  student_phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   class_applying_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
   current_school: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  previous_institute: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  previous_marks_obtained: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  previous_total_marks: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  previous_major_subjects: {
     type: DataTypes.STRING,
     allowNull: true,
   },
@@ -76,6 +96,14 @@ const Inquiry = sequelize.define('Inquiry', {
   },
   referral_parent_name: {
     type: DataTypes.STRING,
+    allowNull: true,
+  },
+  package_name: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  package_amount: {
+    type: DataTypes.INTEGER,
     allowNull: true,
   },
   campus_id: {

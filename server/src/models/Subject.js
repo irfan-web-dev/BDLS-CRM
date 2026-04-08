@@ -20,7 +20,7 @@ const Subject = sequelize.define('Subject', {
     defaultValue: true,
   },
 }, {
-  tableName: 'subjects',
+  tableName: 'crm_subjects',
   underscored: true,
 });
 

@@ -11,6 +11,11 @@ const InquirySource = sequelize.define('InquirySource', {
     type: DataTypes.STRING,
     allowNull: false,
   },
+  campus_type: {
+    type: DataTypes.ENUM('school', 'college'),
+    allowNull: false,
+    defaultValue: 'school',
+  },
   is_active: {
     type: DataTypes.BOOLEAN,
     defaultValue: true,

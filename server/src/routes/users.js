@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
+import { Op } from 'sequelize';
 import { User, Campus, AuditLog } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { authorize, scopeToCampus } from '../middleware/authorize.js';
@@ -7,6 +7,8 @@ import sharedClient from '../services/shared-client.js';
 import { incrementalSync } from '../services/sync.js';
 
 const router = Router();
+const VALID_CAMPUS_TYPES = ['school', 'college'];
+const STAFF_ROLE_SCOPE = ['super_admin', 'admin', 'staff'];
 
 router.use(authenticate);
 router.use(authorize('super_admin', 'admin'));
@@ -16,9 +18,16 @@ router.use(scopeToCampus);
 router.get('/', async (req, res) => {
   try {
     const where = { deleted_at: null, ...req.campusScope };
+    const campusType = req.user.role === 'super_admin' && VALID_CAMPUS_TYPES.includes(req.query.campus_type)
+      ? req.query.campus_type
+      : null;
 
     if (req.query.role) {
-      where.role = req.query.role;
+      const roleQuery = String(req.query.role)
+        .split(',')
+        .map(r => r.trim())
+        .filter(Boolean);
+      where.role = roleQuery.length > 1 ? { [Op.in]: roleQuery } : roleQuery[0];
     }
     if (req.query.is_active !== undefined) {
       where.is_active = req.query.is_active === 'true';
@@ -27,7 +36,12 @@ router.get('/', async (req, res) => {
     const users = await User.findAll({
       where,
       attributes: { exclude: ['password'] },
-      include: [{ model: Campus, as: 'campus' }],
+      include: [{
+        model: Campus,
+        as: 'campus',
+        required: !!campusType,
+        ...(campusType ? { where: { campus_type: campusType, deleted_at: null, is_active: true } } : {}),
+      }],
       order: [['name', 'ASC']],
     });
 
@@ -41,7 +55,15 @@ router.get('/', async (req, res) => {
 // GET /api/users/staff/available
 router.get('/staff/available', async (req, res) => {
   try {
-    const where = { deleted_at: null, is_active: true, ...req.campusScope };
+    const where = {
+      deleted_at: null,
+      is_active: true,
+      role: { [Op.in]: STAFF_ROLE_SCOPE },
+      ...req.campusScope,
+    };
+    const campusType = req.user.role === 'super_admin' && VALID_CAMPUS_TYPES.includes(req.query.campus_type)
+      ? req.query.campus_type
+      : null;
 
     if (req.query.campus_id && req.user.role === 'super_admin') {
       where.campus_id = req.query.campus_id;
@@ -50,6 +72,13 @@ router.get('/staff/available', async (req, res) => {
     const staff = await User.findAll({
       where,
       attributes: ['id', 'name', 'email', 'role', 'campus_id'],
+      include: [{
+        model: Campus,
+        as: 'campus',
+        attributes: ['id', 'name', 'campus_type'],
+        required: !!campusType,
+        ...(campusType ? { where: { campus_type: campusType, deleted_at: null, is_active: true } } : {}),
+      }],
       order: [['name', 'ASC']],
     });
 
@@ -86,12 +115,18 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { name, email, phone, password, role, campus_id } = req.body;
+    const normalizedRole = role === 'teacher' ? 'staff' : (role || 'staff');
+    const isStudent = normalizedRole === 'student';
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email and password are required' });
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Name and email are required' });
     }
 
-    if (role === 'super_admin' && req.user.role !== 'super_admin') {
+    if (!isStudent && !password) {
+      return res.status(400).json({ error: 'Password is required for staff and admin users' });
+    }
+
+    if (normalizedRole === 'super_admin' && req.user.role !== 'super_admin') {
       return res.status(403).json({ error: 'Only super admin can create super admin accounts' });
     }
 
@@ -102,7 +137,7 @@ router.post('/', async (req, res) => {
       super_admin: 'super_admin',
       admin: 'campus_admin',
       staff: 'staff',
-      teacher: 'teacher',
+      student: 'student',
     };
 
     // Create in Shared API (source of truth)
@@ -110,8 +145,8 @@ router.post('/', async (req, res) => {
       name,
       email,
       phone,
-      password,
-      person_type: typeMap[role] || 'staff',
+      ...((!isStudent && password) ? { password } : {}),
+      person_type: typeMap[normalizedRole] || 'staff',
       campus_id: assignedCampus,
     });
 
@@ -123,7 +158,7 @@ router.post('/', async (req, res) => {
       action: 'user.create',
       entity_type: 'user',
       entity_id: person.id,
-      new_values: { name, email, role: role || 'staff', campus_id: assignedCampus },
+      new_values: { name, email, role: normalizedRole, campus_id: assignedCampus },
     });
 
     res.status(201).json(person);
@@ -154,6 +189,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const { name, email, phone, role, campus_id, is_active } = req.body;
+    const normalizedRole = role === 'teacher' ? 'staff' : role;
     const oldValues = { name: user.name, email: user.email, role: user.role, is_active: user.is_active };
 
     if (email && email !== user.email) {
@@ -167,7 +203,7 @@ router.put('/:id', async (req, res) => {
       name: name || user.name,
       email: email || user.email,
       phone: phone !== undefined ? phone : user.phone,
-      role: role || user.role,
+      role: normalizedRole || user.role,
       campus_id: campus_id !== undefined ? campus_id : user.campus_id,
       is_active: is_active !== undefined ? is_active : user.is_active,
     });

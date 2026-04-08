@@ -21,14 +21,23 @@ async function seed() {
     // Create campuses
     const mainCampus = await Campus.create({
       name: 'Main Campus',
+      campus_type: 'school',
       address: '123 Main Street, City Center',
       phone: '0300-1234567',
     });
 
     const branchCampus = await Campus.create({
       name: 'Branch Campus',
+      campus_type: 'school',
       address: '456 Branch Road, Suburb Area',
       phone: '0300-7654321',
+    });
+
+    await Campus.create({
+      name: 'KIPS',
+      campus_type: 'college',
+      address: 'KIPS Campus',
+      phone: '0300-1111111',
     });
 
     console.log('Campuses created.');
@@ -98,7 +107,8 @@ async function seed() {
     ];
 
     for (const name of sourceNames) {
-      await InquirySource.create({ name });
+      await InquirySource.create({ name, campus_type: 'school' });
+      await InquirySource.create({ name, campus_type: 'college' });
     }
 
     console.log('Inquiry sources created.');

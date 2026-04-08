@@ -3,6 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { GraduationCap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
+function inferPortalTypeFromEmail(email) {
+  const value = String(email || '').toLowerCase();
+  if (!value) return null;
+  if (value.includes('college')) return 'college';
+  if (value.includes('school')) return 'school';
+  return null;
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -10,6 +18,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const inferredPortalType = inferPortalTypeFromEmail(email);
+  const portalType = inferredPortalType || 'crm';
+  const portalTitle = portalType === 'college'
+    ? 'College CRM'
+    : portalType === 'school'
+      ? 'School CRM'
+      : 'CRM';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,7 +47,7 @@ export default function Login() {
           <div className="inline-flex items-center justify-center h-14 w-14 rounded-xl bg-primary-600 mb-4">
             <GraduationCap className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">School CRM</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{portalTitle}</h1>
           <p className="mt-1 text-sm text-gray-500">Sign in to your account</p>
         </div>
 
@@ -51,7 +66,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none"
-              placeholder="admin@school.com"
+              placeholder={portalType === 'college' ? 'collegeadmin@school.com' : 'admin@school.com'}
             />
           </div>
 

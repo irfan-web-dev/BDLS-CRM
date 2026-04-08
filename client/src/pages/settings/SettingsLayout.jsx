@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Building2, GraduationCap, Users, Tag, Megaphone } from 'lucide-react';
+import { Building2, GraduationCap, Users, User, Tag, Megaphone } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin } from '../../utils/roleUtils';
 import PageHeader from '../../components/ui/PageHeader';
@@ -8,6 +8,7 @@ const settingsNav = [
   { name: 'Campuses', href: '/settings/campuses', icon: Building2, superAdminOnly: true },
   { name: 'Classes', href: '/settings/classes', icon: GraduationCap },
   { name: 'Staff', href: '/settings/staff', icon: Users },
+  { name: 'Students', href: '/settings/students', icon: User },
   { name: 'Inquiry Sources', href: '/settings/sources', icon: Megaphone },
   { name: 'Inquiry Tags', href: '/settings/tags', icon: Tag },
 ];

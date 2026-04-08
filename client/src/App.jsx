@@ -14,12 +14,14 @@ import InquiryEdit from './pages/inquiries/InquiryEdit';
 
 import Communications from './pages/Communications';
 import Reports from './pages/Reports';
+import Students from './pages/Students';
 
 // Settings
 import SettingsLayout from './pages/settings/SettingsLayout';
 import CampusSettings from './pages/settings/CampusSettings';
 import ClassSettings from './pages/settings/ClassSettings';
 import StaffManagement from './pages/settings/StaffManagement';
+import StudentManagement from './pages/settings/StudentManagement';
 import SourceSettings from './pages/settings/SourceSettings';
 import TagSettings from './pages/settings/TagSettings';
 
@@ -52,7 +54,11 @@ export default function App() {
             <Route path="/inquiries/:id/edit" element={<InquiryEdit />} />
 
             {/* Placeholders for future phases */}
-            <Route path="/students" element={<ComingSoon title="Students" />} />
+            <Route path="/students" element={
+              <RoleRoute roles={['super_admin', 'admin']}>
+                <Students />
+              </RoleRoute>
+            } />
             <Route path="/attendance" element={<ComingSoon title="Attendance" />} />
             <Route path="/homework" element={<ComingSoon title="Homework" />} />
             <Route path="/communications" element={<Communications />} />
@@ -68,6 +74,7 @@ export default function App() {
               <Route path="campuses" element={<CampusSettings />} />
               <Route path="classes" element={<ClassSettings />} />
               <Route path="staff" element={<StaffManagement />} />
+              <Route path="students" element={<StudentManagement />} />
               <Route path="sources" element={<SourceSettings />} />
               <Route path="tags" element={<TagSettings />} />
             </Route>

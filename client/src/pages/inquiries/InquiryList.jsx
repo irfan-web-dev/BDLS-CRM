@@ -5,7 +5,7 @@ import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminOrAbove, isSuperAdmin } from '../../utils/roleUtils';
 import { formatDate, isOverdue } from '../../utils/helpers';
-import { INQUIRY_STATUSES, PRIORITIES } from '../../utils/constants';
+import { INQUIRY_STATUSES, PRIORITIES, GENDERS } from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 import SearchInput from '../../components/ui/SearchInput';
 import FilterBar from '../../components/ui/FilterBar';
@@ -29,10 +29,36 @@ export default function InquiryList() {
   const [classes, setClasses] = useState([]);
   const [sources, setSources] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [previousInstitutes, setPreviousInstitutes] = useState([]);
 
   useEffect(() => {
     loadFilterOptions();
   }, []);
+
+  const selectedCampusIds = (filters.campus_id || []).map(String);
+  const selectedCampuses = campuses.filter(c => selectedCampusIds.includes(String(c.id)));
+  const isCollegeContext = user?.campus?.campus_type === 'college' || (
+    isSuperAdmin(user) && (
+      selectedCampusIds.length > 0
+        ? selectedCampuses.length > 0 && selectedCampuses.every(c => c.campus_type === 'college')
+        : campuses.length > 0 && campuses.every(c => c.campus_type === 'college')
+    )
+  );
+
+  useEffect(() => {
+    if (!isCollegeContext) {
+      setFilters(prev => {
+        const next = { ...prev };
+        delete next.followup_today;
+        delete next.previous_institute;
+        delete next.area;
+        delete next.gender;
+        delete next.marks_sort;
+        return next;
+      });
+    }
+  }, [isCollegeContext]);
 
   useEffect(() => {
     loadInquiries();
@@ -40,14 +66,17 @@ export default function InquiryList() {
 
   async function loadFilterOptions() {
     try {
-      const [campRes, classRes, srcRes] = await Promise.all([
+      const [campRes, classRes, srcRes, optionRes] = await Promise.all([
         api.get('/campuses'),
         api.get('/classes'),
         api.get('/settings/inquiry-sources'),
+        api.get('/inquiries/filter-options'),
       ]);
       setCampuses(campRes.data);
       setClasses(classRes.data);
       setSources(srcRes.data);
+      setAreas(optionRes.data.areas || []);
+      setPreviousInstitutes(optionRes.data.previous_institutes || []);
 
       if (isAdminOrAbove(user)) {
         const staffRes = await api.get('/users/staff/available');
@@ -62,8 +91,22 @@ export default function InquiryList() {
     setLoading(true);
     try {
       const params = { page, limit: 20, search };
+      const marksSort = Array.isArray(filters.marks_sort) ? filters.marks_sort[0] : null;
+      if (marksSort === 'marks_high_to_low') {
+        params.sort_by = 'previous_marks_obtained';
+        params.sort_order = 'DESC';
+      } else if (marksSort === 'marks_low_to_high') {
+        params.sort_by = 'previous_marks_obtained';
+        params.sort_order = 'ASC';
+      }
+
+      if (Array.isArray(filters.followup_today) && filters.followup_today.includes('true')) {
+        params.followup_today = 'true';
+      }
+
       // Convert array filters to comma-separated strings
       Object.entries(filters).forEach(([k, v]) => {
+        if (k === 'marks_sort' || k === 'followup_today') return;
         if (Array.isArray(v) && v.length > 0) {
           params[k] = v.join(',');
         } else if (v && !Array.isArray(v)) {
@@ -90,6 +133,24 @@ export default function InquiryList() {
 
   if (isSuperAdmin(user)) {
     filterConfig.push({ key: 'campus_id', label: 'All Campuses', options: campuses.map(c => ({ value: c.id, label: c.name })) });
+  }
+
+  if (isCollegeContext) {
+    filterConfig.push(
+      { key: 'followup_today', label: 'Follow-up', options: [{ value: 'true', label: "Today's Follow-ups" }] },
+      { key: 'gender', label: 'All Genders', options: GENDERS.map(g => ({ value: g.value, label: g.label })) },
+      { key: 'area', label: 'All Areas', options: areas.map(a => ({ value: a, label: a })) },
+      { key: 'previous_institute', label: 'All Previous Institutes', options: previousInstitutes.map(i => ({ value: i, label: i })) },
+      {
+        key: 'marks_sort',
+        label: 'Marks Sorting',
+        singleSelect: true,
+        options: [
+          { value: 'marks_high_to_low', label: 'Marks: High to Low' },
+          { value: 'marks_low_to_high', label: 'Marks: Low to High' },
+        ],
+      },
+    );
   }
 
   filterConfig.push(

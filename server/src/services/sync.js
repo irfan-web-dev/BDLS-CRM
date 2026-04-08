@@ -11,9 +11,12 @@ async function applySyncData(data) {
   try {
     if (data.campuses) {
       for (const campus of data.campuses) {
+        // Shared API currently may not send campus_type; preserve existing type in CRM.
+        const existingCampus = await Campus.findByPk(campus.id, { transaction: t });
         await Campus.upsert({
           id: campus.id,
           name: campus.name,
+          campus_type: campus.campus_type || existingCampus?.campus_type || 'school',
           address: campus.address,
           phone: campus.phone,
           is_active: campus.is_active,
@@ -28,7 +31,7 @@ async function applySyncData(data) {
         let role = 'staff';
         if (person.person_type === 'super_admin') role = 'super_admin';
         else if (person.person_type === 'campus_admin') role = 'admin';
-        else if (person.person_type === 'teacher') role = 'teacher';
+        else if (person.person_type === 'teacher') role = 'staff';
         else if (person.person_type === 'student') role = 'student';
 
         await User.upsert({

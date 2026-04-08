@@ -1,7 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, ChevronDown, Check } from 'lucide-react';
 
-function MultiSelect({ label, options, selected = [], onChange }) {
+function MultiSelect({
+  label,
+  options,
+  selected = [],
+  onChange,
+  singleSelect = false,
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -17,7 +23,8 @@ function MultiSelect({ label, options, selected = [], onChange }) {
     if (selected.includes(value)) {
       onChange(selected.filter(v => v !== value));
     } else {
-      onChange([...selected, value]);
+      onChange(singleSelect ? [value] : [...selected, value]);
+      if (singleSelect) setOpen(false);
     }
   }
 
@@ -85,6 +92,7 @@ export default function FilterBar({ filters, values, onChange, onClear }) {
           label={filter.label}
           options={filter.options}
           selected={values[filter.key] || []}
+          singleSelect={Boolean(filter.singleSelect)}
           onChange={(val) => onChange(filter.key, val)}
         />
       ))}

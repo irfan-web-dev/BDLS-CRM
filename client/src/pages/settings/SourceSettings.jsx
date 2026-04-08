@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import api from '../../api';
+import { useAuth } from '../../context/AuthContext';
+import { isSuperAdmin } from '../../utils/roleUtils';
 import Modal from '../../components/ui/Modal';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
+import CampusTypeTabs from '../../components/ui/CampusTypeTabs';
 
 export default function SourceSettings() {
+  const { user } = useAuth();
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -13,11 +17,16 @@ export default function SourceSettings() {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [campusType, setCampusType] = useState(user?.campus?.campus_type || 'school');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [campusType]);
 
   async function load() {
-    try { setSources((await api.get('/settings/inquiry-sources')).data); }
+    setLoading(true);
+    try {
+      const params = isSuperAdmin(user) ? { campus_type: campusType } : {};
+      setSources((await api.get('/settings/inquiry-sources', { params })).data);
+    }
     finally { setLoading(false); }
   }
 
@@ -28,8 +37,9 @@ export default function SourceSettings() {
     e.preventDefault();
     setSaving(true);
     try {
-      if (editing) await api.put(`/settings/inquiry-sources/${editing.id}`, { name });
-      else await api.post('/settings/inquiry-sources', { name });
+      const payload = isSuperAdmin(user) ? { name, campus_type: campusType } : { name };
+      if (editing) await api.put(`/settings/inquiry-sources/${editing.id}`, payload);
+      else await api.post('/settings/inquiry-sources', payload);
       load(); setModal(false);
     } finally { setSaving(false); }
   }
@@ -48,6 +58,10 @@ export default function SourceSettings() {
 
   return (
     <div>
+      {isSuperAdmin(user) && (
+        <CampusTypeTabs value={campusType} onChange={setCampusType} className="mb-4" />
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold">Inquiry Sources</h2>
         <button onClick={openCreate} className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700"><Plus className="h-4 w-4" /> Add Source</button>

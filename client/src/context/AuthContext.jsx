@@ -11,7 +11,11 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/auth/me')
-        .then(res => setUser(res.data.user))
+        .then((res) => {
+          setUser(res.data.user);
+          const campusType = res.data?.user?.campus?.campus_type || res.data?.user?.campus_type;
+          if (campusType) localStorage.setItem('crm_portal_type', campusType);
+        })
         .catch(() => localStorage.removeItem('token'))
         .finally(() => setLoading(false));
     } else {
@@ -23,6 +27,8 @@ export function AuthProvider({ children }) {
     const res = await api.post('/auth/login', { email, password });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
+    const campusType = res.data?.user?.campus?.campus_type || res.data?.user?.campus_type;
+    if (campusType) localStorage.setItem('crm_portal_type', campusType);
     return res.data.user;
   };
 

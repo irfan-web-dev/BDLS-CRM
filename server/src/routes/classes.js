@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import { Op } from 'sequelize';
 import { ClassLevel, Section, Subject, Campus } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { authorize, scopeToCampus } from '../middleware/authorize.js';
 
 const router = Router();
+const VALID_CAMPUS_TYPES = ['school', 'college'];
 
 router.use(authenticate);
 router.use(scopeToCampus);
@@ -12,9 +14,20 @@ router.use(scopeToCampus);
 router.get('/', async (req, res) => {
   try {
     const where = { is_active: true };
+    const campusType = req.user.role === 'super_admin' && VALID_CAMPUS_TYPES.includes(req.query.campus_type)
+      ? req.query.campus_type
+      : null;
 
     if (req.query.campus_id) {
       where.campus_id = req.query.campus_id;
+    } else if (campusType) {
+      const campuses = await Campus.findAll({
+        where: { deleted_at: null, is_active: true, campus_type: campusType },
+        attributes: ['id'],
+        raw: true,
+      });
+      const campusIds = campuses.map(c => c.id);
+      where.campus_id = campusIds.length ? { [Op.in]: campusIds } : -1;
     } else if (req.campusScope.campus_id) {
       where.campus_id = req.campusScope.campus_id;
     }
@@ -23,6 +36,7 @@ router.get('/', async (req, res) => {
       where,
       include: [
         { model: Section, as: 'sections', where: { is_active: true }, required: false },
+        { model: Campus, as: 'campus', attributes: ['id', 'name', 'campus_type'], required: false },
       ],
       order: [['sort_order', 'ASC'], ['name', 'ASC']],
     });
@@ -68,12 +82,13 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req, res) => {
       return res.status(404).json({ error: 'Class not found' });
     }
 
-    const { name, sort_order, is_active } = req.body;
+    const { name, sort_order, is_active, campus_id } = req.body;
 
     await classLevel.update({
       name: name || classLevel.name,
       sort_order: sort_order !== undefined ? sort_order : classLevel.sort_order,
       is_active: is_active !== undefined ? is_active : classLevel.is_active,
+      campus_id: req.user.role === 'super_admin' && campus_id !== undefined ? campus_id : classLevel.campus_id,
     });
 
     res.json(classLevel);

@@ -8,9 +8,75 @@ import { authenticate } from '../middleware/auth.js';
 import { scopeToCampus } from '../middleware/authorize.js';
 
 const router = Router();
+const VALID_CAMPUS_TYPES = ['school', 'college'];
+const STAFF_ROLE_SCOPE = ['super_admin', 'admin', 'staff'];
 
 router.use(authenticate);
 router.use(scopeToCampus);
+
+const ALLOWED_SORT_FIELDS = new Set([
+  'created_at',
+  'updated_at',
+  'inquiry_date',
+  'next_follow_up_date',
+  'previous_marks_obtained',
+  'student_name',
+  'parent_name',
+  'priority',
+  'status',
+]);
+
+async function applyCampusTypeScope(req, where) {
+  const campusType = req.user.role === 'super_admin' ? req.query.campus_type : null;
+  if (!VALID_CAMPUS_TYPES.includes(campusType)) return;
+
+  const campuses = await Campus.findAll({
+    where: { deleted_at: null, is_active: true, campus_type: campusType },
+    attributes: ['id'],
+    raw: true,
+  });
+  const campusIds = campuses.map(c => c.id);
+  where.campus_id = campusIds.length ? { [Op.in]: campusIds } : -1;
+}
+
+async function validateAssignedStaff(req, assignedStaffId, inquiryCampusId) {
+  if (!assignedStaffId) return null;
+
+  const normalizedStaffId = Number.parseInt(assignedStaffId, 10);
+  if (!Number.isInteger(normalizedStaffId)) {
+    return { error: 'Assigned staff is invalid' };
+  }
+
+  const assignedStaff = await User.findOne({
+    where: {
+      id: normalizedStaffId,
+      deleted_at: null,
+      is_active: true,
+      role: { [Op.in]: STAFF_ROLE_SCOPE },
+    },
+    attributes: ['id', 'role', 'campus_id'],
+    raw: true,
+  });
+
+  if (!assignedStaff) {
+    return { error: 'Assigned staff must be an active admin/staff user' };
+  }
+
+  if (req.user.role === 'admin' && assignedStaff.role !== 'super_admin' && assignedStaff.campus_id !== req.user.campus_id) {
+    return { error: 'Assigned staff must belong to your campus' };
+  }
+
+  const normalizedCampusId = Number.parseInt(inquiryCampusId, 10);
+  if (
+    Number.isInteger(normalizedCampusId)
+    && assignedStaff.role !== 'super_admin'
+    && assignedStaff.campus_id !== normalizedCampusId
+  ) {
+    return { error: 'Assigned staff must belong to inquiry campus' };
+  }
+
+  return { id: normalizedStaffId };
+}
 
 // GET /api/inquiries
 router.get('/', async (req, res) => {
@@ -18,10 +84,12 @@ router.get('/', async (req, res) => {
     const {
       status, campus_id, class_id, source_id, assigned_staff_id,
       priority, date_from, date_to, search, tag_id,
+      gender, area, previous_institute, followup_today,
       page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC',
     } = req.query;
 
     const where = { deleted_at: null, ...req.campusScope };
+    await applyCampusTypeScope(req, where);
 
     // Support multi-value filters (comma-separated)
     if (status) where.status = status.includes(',') ? { [Op.in]: status.split(',') } : status;
@@ -30,6 +98,17 @@ router.get('/', async (req, res) => {
     if (source_id) where.source_id = String(source_id).includes(',') ? { [Op.in]: source_id.split(',') } : source_id;
     if (assigned_staff_id) where.assigned_staff_id = String(assigned_staff_id).includes(',') ? { [Op.in]: assigned_staff_id.split(',') } : assigned_staff_id;
     if (priority) where.priority = priority.includes(',') ? { [Op.in]: priority.split(',') } : priority;
+    if (gender) where.gender = gender.includes(',') ? { [Op.in]: gender.split(',') } : gender;
+    if (area) where.area = area.includes(',') ? { [Op.in]: area.split(',') } : area;
+    if (previous_institute) {
+      where.previous_institute = previous_institute.includes(',')
+        ? { [Op.in]: previous_institute.split(',') }
+        : previous_institute;
+    }
+
+    if (followup_today === 'true' || followup_today === '1') {
+      where.next_follow_up_date = new Date().toISOString().split('T')[0];
+    }
 
     if (date_from || date_to) {
       where.inquiry_date = {};
@@ -42,6 +121,7 @@ router.get('/', async (req, res) => {
         { parent_name: { [Op.iLike]: `%${search}%` } },
         { student_name: { [Op.iLike]: `%${search}%` } },
         { parent_phone: { [Op.iLike]: `%${search}%` } },
+        { student_phone: { [Op.iLike]: `%${search}%` } },
       ];
     }
 
@@ -63,10 +143,13 @@ router.get('/', async (req, res) => {
       where.id = { [Op.in]: inquiryIds };
     }
 
+    const safeSortBy = ALLOWED_SORT_FIELDS.has(sort_by) ? sort_by : 'created_at';
+    const safeSortOrder = String(sort_order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
     const { count, rows } = await Inquiry.findAndCountAll({
       where,
       include: includeOptions,
-      order: [[sort_by, sort_order.toUpperCase()]],
+      order: [[safeSortBy, safeSortOrder]],
       limit: parseInt(limit),
       offset,
       distinct: true,
@@ -87,10 +170,35 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/inquiries/filter-options
+router.get('/filter-options', async (req, res) => {
+  try {
+    const where = { deleted_at: null, ...req.campusScope };
+    await applyCampusTypeScope(req, where);
+    const rows = await Inquiry.findAll({
+      where,
+      attributes: ['area', 'previous_institute'],
+      raw: true,
+    });
+
+    const clean = (value) => (typeof value === 'string' ? value.trim() : '');
+    const areas = [...new Set(rows.map(r => clean(r.area)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    const previous_institutes = [...new Set(rows.map(r => clean(r.previous_institute)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+
+    res.json({ areas, previous_institutes });
+  } catch (error) {
+    console.error('Inquiry filter options error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/inquiries/pipeline
 router.get('/pipeline', async (req, res) => {
   try {
     const where = { deleted_at: null, ...req.campusScope };
+    await applyCampusTypeScope(req, where);
 
     const pipeline = await Inquiry.findAll({
       where,
@@ -117,6 +225,7 @@ router.get('/overdue', async (req, res) => {
       next_follow_up_date: { [Op.lt]: new Date().toISOString().split('T')[0] },
       status: { [Op.notIn]: ['admitted', 'not_interested', 'lost', 'no_response'] },
     };
+    await applyCampusTypeScope(req, where);
 
     const inquiries = await Inquiry.findAll({
       where,
@@ -143,6 +252,7 @@ router.get('/reminders', async (req, res) => {
       ...req.campusScope,
       status: { [Op.notIn]: ['admitted', 'not_interested', 'lost', 'no_response'] },
     };
+    await applyCampusTypeScope(req, baseWhere);
 
     const include = [
       { model: User, as: 'assignedStaff', attributes: ['id', 'name'] },
@@ -219,27 +329,62 @@ router.post('/', async (req, res) => {
   try {
     const {
       parent_name, relationship, parent_phone, parent_whatsapp, parent_email,
-      city, area, student_name, date_of_birth, gender, class_applying_id,
-      current_school, special_needs, inquiry_date, source_id, referral_parent_name,
+      city, area, student_name, date_of_birth, gender, student_phone, class_applying_id,
+      current_school, previous_institute, previous_marks_obtained, previous_total_marks, previous_major_subjects,
+      special_needs, inquiry_date, source_id, referral_parent_name, package_name, package_amount,
       campus_id, session_preference, assigned_staff_id, priority, notes, tag_ids,
     } = req.body;
 
-    if (!parent_name || !parent_phone || !student_name || !class_applying_id) {
+    const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : (campus_id || req.user.campus_id);
+    const campusRecord = await Campus.findOne({
+      where: { id: assignedCampus, deleted_at: null, is_active: true },
+      attributes: ['id', 'campus_type'],
+      raw: true,
+    });
+    const isCollegeFlow = campusRecord?.campus_type === 'college';
+
+    if (!student_name || !class_applying_id) {
       return res.status(400).json({
-        error: 'Parent name, phone, student name and class are required',
+        error: 'Student name and class are required',
       });
     }
 
-    const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : (campus_id || req.user.campus_id);
+    if (!isCollegeFlow && (!parent_name || !parent_phone)) {
+      return res.status(400).json({
+        error: 'Parent name and phone are required for school inquiries',
+      });
+    }
+
+    const normalizedParentName = isCollegeFlow
+      ? (parent_name || student_name || 'Self')
+      : parent_name;
+    const normalizedParentPhone = isCollegeFlow
+      ? (parent_phone || student_phone || 'N/A')
+      : parent_phone;
+    const normalizedRelationship = relationship || (isCollegeFlow ? 'other' : 'father');
+
+    let normalizedAssignedStaffId = null;
+    if (assigned_staff_id) {
+      const validation = await validateAssignedStaff(req, assigned_staff_id, assignedCampus);
+      if (validation?.error) {
+        return res.status(400).json({ error: validation.error });
+      }
+      normalizedAssignedStaffId = validation.id;
+    }
 
     const inquiry = await Inquiry.create({
-      parent_name, relationship, parent_phone, parent_whatsapp, parent_email,
-      city, area, student_name, date_of_birth, gender, class_applying_id,
-      current_school, special_needs,
+      parent_name: normalizedParentName,
+      relationship: normalizedRelationship,
+      parent_phone: normalizedParentPhone,
+      parent_whatsapp,
+      parent_email,
+      city, area, student_name, date_of_birth, gender, student_phone, class_applying_id,
+      current_school, previous_institute, previous_marks_obtained, previous_total_marks, previous_major_subjects,
+      special_needs,
       inquiry_date: inquiry_date || new Date().toISOString().split('T')[0],
-      source_id, referral_parent_name,
+      source_id, referral_parent_name, package_name, package_amount,
       campus_id: assignedCampus,
-      session_preference, assigned_staff_id, priority,
+      session_preference, assigned_staff_id: normalizedAssignedStaffId, priority,
       notes, status: 'new',
       created_by: req.user.id,
     });
@@ -256,7 +401,7 @@ router.post('/', async (req, res) => {
       action: 'inquiry.create',
       entity_type: 'inquiry',
       entity_id: inquiry.id,
-      new_values: { student_name, parent_name, status: 'new' },
+      new_values: { student_name, parent_name: normalizedParentName, status: 'new' },
     });
 
     const created = await Inquiry.findByPk(inquiry.id, {
@@ -286,6 +431,26 @@ router.put('/:id', async (req, res) => {
 
     const oldValues = inquiry.toJSON();
     const { tag_ids, ...updateData } = req.body;
+    const targetCampusId = updateData.campus_id !== undefined && updateData.campus_id !== null
+      ? updateData.campus_id
+      : inquiry.campus_id;
+    if (updateData.assigned_staff_id !== undefined && updateData.assigned_staff_id !== null) {
+      const validation = await validateAssignedStaff(req, updateData.assigned_staff_id, targetCampusId);
+      if (validation?.error) {
+        return res.status(400).json({ error: validation.error });
+      }
+      updateData.assigned_staff_id = validation.id;
+    }
+
+    if (updateData.previous_marks_obtained !== undefined && updateData.previous_marks_obtained !== null) {
+      updateData.previous_marks_obtained = Number.parseInt(updateData.previous_marks_obtained, 10);
+    }
+    if (updateData.previous_total_marks !== undefined && updateData.previous_total_marks !== null) {
+      updateData.previous_total_marks = Number.parseInt(updateData.previous_total_marks, 10);
+    }
+    if (updateData.package_amount !== undefined && updateData.package_amount !== null) {
+      updateData.package_amount = Number.parseInt(updateData.package_amount, 10);
+    }
 
     updateData.updated_by = req.user.id;
     await inquiry.update(updateData);
@@ -370,7 +535,17 @@ router.patch('/:id/assign', async (req, res) => {
     }
 
     const oldStaff = inquiry.assigned_staff_id;
-    await inquiry.update({ assigned_staff_id, updated_by: req.user.id });
+    let normalizedAssignedStaffId = null;
+
+    if (assigned_staff_id !== null && assigned_staff_id !== undefined && assigned_staff_id !== '') {
+      const validation = await validateAssignedStaff(req, assigned_staff_id, inquiry.campus_id);
+      if (validation?.error) {
+        return res.status(400).json({ error: validation.error });
+      }
+      normalizedAssignedStaffId = validation.id;
+    }
+
+    await inquiry.update({ assigned_staff_id: normalizedAssignedStaffId, updated_by: req.user.id });
 
     await AuditLog.create({
       user_id: req.user.id,
@@ -378,7 +553,7 @@ router.patch('/:id/assign', async (req, res) => {
       entity_type: 'inquiry',
       entity_id: inquiry.id,
       old_values: { assigned_staff_id: oldStaff },
-      new_values: { assigned_staff_id },
+      new_values: { assigned_staff_id: normalizedAssignedStaffId },
     });
 
     res.json(inquiry);

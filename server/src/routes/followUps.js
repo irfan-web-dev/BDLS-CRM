@@ -1,13 +1,33 @@
 import { Router } from 'express';
 import { Op } from 'sequelize';
-import { InquiryFollowUp, Inquiry, User } from '../models/index.js';
+import { InquiryFollowUp, Inquiry, User, Campus } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
-import { scopeToCampus } from '../middleware/authorize.js';
+import { authorize, scopeToCampus } from '../middleware/authorize.js';
 
 const router = Router();
+const VALID_CAMPUS_TYPES = ['school', 'college'];
+const STAFF_ROLE_SCOPE = ['super_admin', 'admin', 'staff'];
 
 router.use(authenticate);
+router.use(authorize('super_admin', 'admin', 'staff'));
 router.use(scopeToCampus);
+
+async function buildInquiryWhere(req) {
+  const where = { deleted_at: null, ...req.campusScope };
+  const campusType = req.query.campus_type;
+
+  if (req.user.role === 'super_admin' && VALID_CAMPUS_TYPES.includes(campusType)) {
+    const campuses = await Campus.findAll({
+      where: { deleted_at: null, is_active: true, campus_type: campusType },
+      attributes: ['id'],
+      raw: true,
+    });
+    const campusIds = campuses.map(c => c.id);
+    where.campus_id = campusIds.length ? { [Op.in]: campusIds } : -1;
+  }
+
+  return where;
+}
 
 // GET /api/follow-ups
 router.get('/', async (req, res) => {
@@ -29,17 +49,31 @@ router.get('/', async (req, res) => {
       if (date_to) where.follow_up_date[Op.lte] = date_to;
     }
 
+    const inquiryWhere = await buildInquiryWhere(req);
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { count, rows } = await InquiryFollowUp.findAndCountAll({
       where,
       include: [
-        { model: Inquiry, as: 'inquiry', attributes: ['id', 'student_name', 'parent_name', 'parent_phone', 'status'] },
-        { model: User, as: 'staff', attributes: ['id', 'name'] },
+        {
+          model: Inquiry,
+          as: 'inquiry',
+          attributes: ['id', 'student_name', 'parent_name', 'parent_phone', 'status'],
+          where: inquiryWhere,
+          required: true,
+        },
+        {
+          model: User,
+          as: 'staff',
+          attributes: ['id', 'name', 'role'],
+          where: { role: { [Op.in]: STAFF_ROLE_SCOPE } },
+          required: true,
+        },
       ],
       order: [['follow_up_date', 'DESC']],
       limit: parseInt(limit),
       offset,
+      distinct: true,
     });
 
     res.json({
@@ -66,11 +100,24 @@ router.get('/due-today', async (req, res) => {
       where.staff_id = req.user.id;
     }
 
+    const inquiryWhere = await buildInquiryWhere(req);
     const followUps = await InquiryFollowUp.findAll({
       where,
       include: [
-        { model: Inquiry, as: 'inquiry', attributes: ['id', 'student_name', 'parent_name', 'parent_phone', 'status'] },
-        { model: User, as: 'staff', attributes: ['id', 'name'] },
+        {
+          model: Inquiry,
+          as: 'inquiry',
+          attributes: ['id', 'student_name', 'parent_name', 'parent_phone', 'status'],
+          where: inquiryWhere,
+          required: true,
+        },
+        {
+          model: User,
+          as: 'staff',
+          attributes: ['id', 'name', 'role'],
+          where: { role: { [Op.in]: STAFF_ROLE_SCOPE } },
+          required: true,
+        },
       ],
       order: [['follow_up_date', 'DESC']],
     });
@@ -93,7 +140,10 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Inquiry and type are required' });
     }
 
-    const inquiry = await Inquiry.findOne({ where: { id: inquiry_id, deleted_at: null } });
+    const inquiryWhere = await buildInquiryWhere(req);
+    const inquiry = await Inquiry.findOne({
+      where: { ...inquiryWhere, id: inquiry_id },
+    });
     if (!inquiry) {
       return res.status(404).json({ error: 'Inquiry not found' });
     }

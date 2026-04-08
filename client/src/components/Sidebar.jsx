@@ -6,10 +6,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { isAdminOrAbove } from '../utils/roleUtils';
 
-const navigation = [
+const primaryNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Inquiries', href: '/inquiries', icon: UserSearch },
-  { name: 'Students', href: '/students', icon: GraduationCap },
   { name: 'Attendance', href: '/attendance', icon: ClipboardCheck },
   { name: 'Homework', href: '/homework', icon: BookOpen },
   { name: 'Communications', href: '/communications', icon: MessageSquare },
@@ -20,8 +19,23 @@ const adminNavigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
+function getPortalTitle(user) {
+  if (user?.role === 'super_admin') return 'CRM';
+  const campusType = user?.campus?.campus_type || user?.campus_type;
+  return campusType === 'college' ? 'College CRM' : 'School CRM';
+}
+
 export default function Sidebar({ open, onClose }) {
   const { user } = useAuth();
+  const portalTitle = getPortalTitle(user);
+  const navigation = isAdminOrAbove(user)
+    ? [
+      primaryNavigation[0],
+      primaryNavigation[1],
+      { name: 'Students', href: '/students', icon: GraduationCap },
+      ...primaryNavigation.slice(2),
+    ]
+    : primaryNavigation;
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
@@ -38,7 +52,7 @@ export default function Sidebar({ open, onClose }) {
           <div className="h-8 w-8 rounded-lg bg-primary-600 flex items-center justify-center">
             <GraduationCap className="h-5 w-5 text-white" />
           </div>
-          <span className="text-lg font-bold text-gray-900">School CRM</span>
+          <span className="text-lg font-bold text-gray-900">{portalTitle}</span>
         </div>
         <button onClick={onClose} className="lg:hidden rounded-lg p-1 hover:bg-gray-100">
           <X className="h-5 w-5 text-gray-500" />
