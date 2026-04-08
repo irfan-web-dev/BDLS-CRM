@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
     const {
       status, campus_id, class_id, source_id, assigned_staff_id,
       priority, date_from, date_to, search, tag_id,
-      gender, area, previous_institute, followup_today,
+      gender, area, previous_institute, followup_today, followup_filter,
       page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC',
     } = req.query;
 
@@ -106,8 +106,28 @@ router.get('/', async (req, res) => {
         : previous_institute;
     }
 
-    if (followup_today === 'true' || followup_today === '1') {
-      where.next_follow_up_date = new Date().toISOString().split('T')[0];
+    const todayDate = new Date();
+    const today = todayDate.toISOString().split('T')[0];
+    const tomorrowDate = new Date(todayDate);
+    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+    const tomorrow = tomorrowDate.toISOString().split('T')[0];
+    const nextWeekDate = new Date(todayDate);
+    nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+    const nextWeek = nextWeekDate.toISOString().split('T')[0];
+
+    if (followup_filter === 'today') {
+      where.next_follow_up_date = today;
+    } else if (followup_filter === 'overdue') {
+      where.next_follow_up_date = { [Op.lt]: today, [Op.ne]: null };
+    } else if (followup_filter === 'tomorrow') {
+      where.next_follow_up_date = tomorrow;
+    } else if (followup_filter === 'next_7_days') {
+      where.next_follow_up_date = { [Op.gte]: today, [Op.lte]: nextWeek };
+    } else if (followup_filter === 'no_date') {
+      where.next_follow_up_date = { [Op.is]: null };
+    } else if (followup_today === 'true' || followup_today === '1') {
+      // Backward compatibility with old client filter
+      where.next_follow_up_date = today;
     }
 
     if (date_from || date_to) {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Edit2 } from 'lucide-react';
+import { Plus, Edit2, ArrowUp, ArrowDown } from 'lucide-react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminOrAbove, isSuperAdmin } from '../../utils/roleUtils';
@@ -50,7 +50,7 @@ export default function InquiryList() {
     if (!isCollegeContext) {
       setFilters(prev => {
         const next = { ...prev };
-        delete next.followup_today;
+        delete next.followup_filter;
         delete next.previous_institute;
         delete next.area;
         delete next.gender;
@@ -91,22 +91,22 @@ export default function InquiryList() {
     setLoading(true);
     try {
       const params = { page, limit: 20, search };
-      const marksSort = Array.isArray(filters.marks_sort) ? filters.marks_sort[0] : null;
-      if (marksSort === 'marks_high_to_low') {
+      if (filters.marks_sort === 'DESC') {
         params.sort_by = 'previous_marks_obtained';
         params.sort_order = 'DESC';
-      } else if (marksSort === 'marks_low_to_high') {
+      } else if (filters.marks_sort === 'ASC') {
         params.sort_by = 'previous_marks_obtained';
         params.sort_order = 'ASC';
       }
 
-      if (Array.isArray(filters.followup_today) && filters.followup_today.includes('true')) {
-        params.followup_today = 'true';
+      const followupFilter = Array.isArray(filters.followup_filter) ? filters.followup_filter[0] : null;
+      if (followupFilter) {
+        params.followup_filter = followupFilter;
       }
 
       // Convert array filters to comma-separated strings
       Object.entries(filters).forEach(([k, v]) => {
-        if (k === 'marks_sort' || k === 'followup_today') return;
+        if (k === 'marks_sort' || k === 'followup_filter') return;
         if (Array.isArray(v) && v.length > 0) {
           params[k] = v.join(',');
         } else if (v && !Array.isArray(v)) {
@@ -137,19 +137,21 @@ export default function InquiryList() {
 
   if (isCollegeContext) {
     filterConfig.push(
-      { key: 'followup_today', label: 'Follow-up', options: [{ value: 'true', label: "Today's Follow-ups" }] },
+      {
+        key: 'followup_filter',
+        label: 'Follow-up',
+        singleSelect: true,
+        options: [
+          { value: 'today', label: "Today's Follow-ups" },
+          { value: 'overdue', label: 'Overdue Follow-ups' },
+          { value: 'tomorrow', label: "Tomorrow's Follow-ups" },
+          { value: 'next_7_days', label: 'Next 7 Days' },
+          { value: 'no_date', label: 'No Follow-up Date' },
+        ],
+      },
       { key: 'gender', label: 'All Genders', options: GENDERS.map(g => ({ value: g.value, label: g.label })) },
       { key: 'area', label: 'All Areas', options: areas.map(a => ({ value: a, label: a })) },
       { key: 'previous_institute', label: 'All Previous Institutes', options: previousInstitutes.map(i => ({ value: i, label: i })) },
-      {
-        key: 'marks_sort',
-        label: 'Marks Sorting',
-        singleSelect: true,
-        options: [
-          { value: 'marks_high_to_low', label: 'Marks: High to Low' },
-          { value: 'marks_low_to_high', label: 'Marks: Low to High' },
-        ],
-      },
     );
   }
 
@@ -199,6 +201,49 @@ export default function InquiryList() {
             onChange={(key, val) => { setFilters(prev => ({ ...prev, [key]: val })); setPage(1); }}
             onClear={() => { setFilters({}); setPage(1); }}
           />
+          {isCollegeContext && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs sm:text-sm text-gray-500">Marks Sort</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters(prev => ({
+                    ...prev,
+                    marks_sort: prev.marks_sort === 'ASC' ? undefined : 'ASC',
+                  }));
+                  setPage(1);
+                }}
+                className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  filters.marks_sort === 'ASC'
+                    ? 'border-primary-300 bg-primary-50 text-primary-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+                title="Marks: Low to High"
+              >
+                <ArrowUp className="h-3.5 w-3.5" />
+                <span>Low to High</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters(prev => ({
+                    ...prev,
+                    marks_sort: prev.marks_sort === 'DESC' ? undefined : 'DESC',
+                  }));
+                  setPage(1);
+                }}
+                className={`inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  filters.marks_sort === 'DESC'
+                    ? 'border-primary-300 bg-primary-50 text-primary-700'
+                    : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+                title="Marks: High to Low"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+                <span>High to Low</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Content */}
