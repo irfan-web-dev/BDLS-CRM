@@ -3,14 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { GraduationCap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-function inferPortalTypeFromEmail(email) {
-  const value = String(email || '').toLowerCase();
-  if (!value) return null;
-  if (value.includes('college')) return 'college';
-  if (value.includes('school')) return 'school';
-  return null;
-}
-
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,13 +10,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
-  const inferredPortalType = inferPortalTypeFromEmail(email);
-  const portalType = inferredPortalType || 'crm';
-  const portalTitle = portalType === 'college'
-    ? 'College CRM'
-    : portalType === 'school'
-      ? 'School CRM'
-      : 'CRM';
+  const portalTitle = 'CRM';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -66,7 +52,7 @@ export default function Login() {
               onChange={(e) => setEmail(e.target.value)}
               required
               className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none"
-              placeholder={portalType === 'college' ? 'collegeadmin@school.com' : 'admin@school.com'}
+              placeholder="admin@school.com"
             />
           </div>
 

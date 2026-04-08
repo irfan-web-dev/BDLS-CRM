@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isAdminOrAbove } from '../utils/roleUtils';
+import { getPortalTitle } from '../utils/portalBranding';
 
 const primaryNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -18,12 +19,6 @@ const adminNavigation = [
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
-
-function getPortalTitle(user) {
-  if (user?.role === 'super_admin') return 'CRM';
-  const campusType = user?.campus?.campus_type || user?.campus_type;
-  return campusType === 'college' ? 'College CRM' : 'School CRM';
-}
 
 export default function Sidebar({ open, onClose }) {
   const { user } = useAuth();

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AuditLog } from '../models/index.js';
+import { AuditLog, Campus } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import sharedClient from '../services/shared-client.js';
 
@@ -34,6 +34,23 @@ router.post('/login', async (req, res) => {
       ...result.user,
       role: roleMap[result.user.person_type] || 'staff',
     };
+
+    // Shared API campuses don't store campus_type, so enrich from CRM cache.
+    const campusId = result.user?.campus_id;
+    if (campusId) {
+      const cachedCampus = await Campus.findByPk(campusId, {
+        attributes: ['id', 'name', 'campus_type'],
+      });
+      if (cachedCampus) {
+        userData.campus_type = cachedCampus.campus_type;
+        userData.campus = {
+          ...(result.user.campus || {}),
+          id: cachedCampus.id,
+          name: result.user?.campus?.name || cachedCampus.name,
+          campus_type: cachedCampus.campus_type,
+        };
+      }
+    }
 
     await AuditLog.create({
       user_id: result.user.id,
