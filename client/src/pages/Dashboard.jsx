@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   UserSearch, UserCheck, TrendingUp, Clock, AlertTriangle,
-  Phone, ArrowRight, MessageSquare, PhoneOff, Users, Workflow, CheckCircle2, UserX,
+  Phone, ArrowRight, MessageSquare, PhoneOff, Users,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
 import { isAdminOrAbove, isSuperAdmin } from '../utils/roleUtils';
-import { formatDate, relativeTime } from '../utils/helpers';
+import { formatDate, formatDateTime, relativeTime } from '../utils/helpers';
 import { INQUIRY_STATUSES } from '../utils/constants';
 import StatCard from '../components/ui/StatCard';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
@@ -18,6 +18,52 @@ import CampusTypeTabs from '../components/ui/CampusTypeTabs';
 
 const PIE_COLORS = ['#3b82f6', '#22c55e', '#eab308', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4', '#ec4899', '#6b7280', '#14b8a6'];
 const CAMPUS_SCOPE_LABELS = { all: 'All Campuses', school: 'School', college: 'College' };
+const ACTIVITY_FIELD_LABELS = {
+  next_follow_up_date: 'next follow-up date',
+  assigned_staff_id: 'assigned staff',
+  status: 'status',
+  interest_level: 'interest level',
+  notes: 'notes',
+  parent_phone: 'parent phone',
+  parent_name: 'parent name',
+  student_name: 'student name',
+  inquiry_date: 'inquiry date',
+};
+const ACTIVITY_TIME_FILTERS = [
+  { value: '24h', label: 'Last 24 Hours', days: 1 },
+  { value: '3d', label: 'Last 3 Days', days: 3 },
+  { value: '7d', label: 'Last 7 Days', days: 7 },
+  { value: '14d', label: 'Last 14 Days', days: 14 },
+  { value: '30d', label: 'Last 30 Days', days: 30 },
+  { value: 'all', label: 'All Time', days: null },
+];
+
+function formatActivityAction(action) {
+  return String(action || '').replace(/\./g, ' ').replace(/_/g, ' ');
+}
+
+function formatActivityField(field) {
+  if (!field) return '';
+  if (ACTIVITY_FIELD_LABELS[field]) return ACTIVITY_FIELD_LABELS[field];
+  return String(field).replace(/_/g, ' ');
+}
+
+function getActivityInquiryId(activity) {
+  if (activity?.entity_type === 'inquiry' && activity?.entity_id) return activity.entity_id;
+  if (activity?.entity_type === 'follow_up') {
+    return activity?.new_values?.inquiry_id || activity?.old_values?.inquiry_id || null;
+  }
+  return null;
+}
+
+function getActivityChangedFields(activity) {
+  if (!String(activity?.action || '').includes('update')) return [];
+  const oldValues = activity?.old_values && typeof activity.old_values === 'object' ? activity.old_values : {};
+  const newValues = activity?.new_values && typeof activity.new_values === 'object' ? activity.new_values : {};
+  return Array.from(new Set([...Object.keys(oldValues), ...Object.keys(newValues)]))
+    .filter((key) => JSON.stringify(oldValues[key]) !== JSON.stringify(newValues[key]))
+    .slice(0, 3);
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -37,6 +83,7 @@ export default function Dashboard() {
   const [staffHealthFilter, setStaffHealthFilter] = useState('all');
   const [staffSearch, setStaffSearch] = useState('');
   const [selectedStaffId, setSelectedStaffId] = useState(null);
+  const [activityTimeFilter, setActivityTimeFilter] = useState('all');
 
   useEffect(() => {
     if (isSuperAdmin(user)) {
@@ -68,7 +115,7 @@ export default function Dashboard() {
         api.get('/dashboard/admission-stats', { params }),
         api.get('/dashboard/follow-up-stats', { params }),
         api.get('/inquiries/reminders', { params }),
-        api.get('/dashboard/recent-activity'),
+        api.get('/dashboard/recent-activity', { params: { ...params, limit: isAdminOrAbove(user) ? 200 : 100 } }),
         api.get('/dashboard/communication-stats', { params }),
         isAdminOrAbove(user)
           ? api.get('/dashboard/staff-performance', { params }).catch(() => ({ data: null }))
@@ -98,13 +145,76 @@ export default function Dashboard() {
     return { name: found?.label || s.status, value: parseInt(s.count) };
   }) || [];
 
-  const sourceData = admissionStats?.bySource || [];
+  const sourceData = (admissionStats?.bySourceDetailed || admissionStats?.bySource || []).map((s) => ({
+    name: s.name || 'Unknown',
+    count: Number(s.count) || 0,
+    schoolCount: Number(s?.breakdown?.school ?? s?.schoolCount ?? 0) || 0,
+    collegeCount: Number(s?.breakdown?.college ?? s?.collegeCount ?? 0) || 0,
+    unknownCount: Number(s?.breakdown?.unknown ?? s?.unknownCount ?? 0) || 0,
+  }));
   const scopeLabel = CAMPUS_SCOPE_LABELS[campusType] || 'School';
+  const isAllCampuses = campusType === 'all';
+  const sourceTooltipContent = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const item = payload[0]?.payload;
+    if (!item) return null;
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm text-xs">
+        <p className="font-semibold text-gray-900 mb-1">{item.name}</p>
+        <p className="text-gray-700">Total: {item.count}</p>
+        {isAllCampuses ? (
+          <>
+            <p className="text-gray-600">School: {item.schoolCount || 0}</p>
+            <p className="text-gray-600">College: {item.collegeCount || 0}</p>
+          </>
+        ) : (
+          <p className="text-gray-600">{scopeLabel}: {item.count}</p>
+        )}
+      </div>
+    );
+  };
   const controlOverview = controlAnalytics?.overview;
   const controlRisk = controlAnalytics?.risk;
+  const controlOverdue = controlAnalytics?.overdue;
+  const controlCampusBreakdown = controlAnalytics?.campusBreakdown;
   const classPerformance = controlAnalytics?.classPerformance || [];
   const staffControl = controlAnalytics?.staffControl || [];
   const topAreas = controlAnalytics?.topAreas || [];
+  const lowRiskDefinition = controlRisk?.lowDefinition
+    || 'Low Risk means active inquiries without overdue pressure and with healthy recent contact progress.';
+  const schoolControl = controlCampusBreakdown?.school || {
+    totalInquiries: 0, activeInquiries: 0, lowRiskCount: 0, dueTodayCount: 0, overdueCount: 0, historicalOverdueCount: 0, recoveredOverdueCount: 0,
+  };
+  const collegeControl = controlCampusBreakdown?.college || {
+    totalInquiries: 0, activeInquiries: 0, lowRiskCount: 0, dueTodayCount: 0, overdueCount: 0, historicalOverdueCount: 0, recoveredOverdueCount: 0,
+  };
+  const campusControlCards = isAllCampuses
+    ? [
+      { label: 'School', data: schoolControl },
+      { label: 'College', data: collegeControl },
+    ]
+    : [
+      {
+        label: campusType === 'college' ? 'College' : 'School',
+        data: campusType === 'college' ? collegeControl : schoolControl,
+      },
+    ];
+  const overdueAging = controlOverdue?.agingBuckets || {};
+  const overdueHistory = controlOverdue?.history || {};
+  const oldestOverdueLabel = controlOverdue?.oldestDate
+    ? `${formatDate(controlOverdue.oldestDate)} (${controlOverdue.oldestDaysOverdue || 0}d)`
+    : 'No overdue follow-up';
+  const averageOverdueDaysLabel = controlOverview?.overdueCount
+    ? `${controlOverdue?.averageDaysOverdue || 0}d`
+    : '-';
+  const historicalOverdueCount = overdueHistory.totalHistoricallyOverdue ?? controlOverview?.historicallyOverdueCount ?? 0;
+  const recoveredOverdueCount = overdueHistory.recoveredOverdue ?? controlOverview?.recoveredOverdueCount ?? 0;
+  const recoveredOverdueThisMonth = overdueHistory.recoveredThisMonth ?? controlOverview?.recoveredOverdueThisMonth ?? 0;
+  const lastRecoveredAtLabel = overdueHistory.lastRecoveredAt
+    ? formatDateTime(overdueHistory.lastRecoveredAt)
+    : '-';
+  const thisMonthConversionRate = admissionStats?.conversionRate ?? 0;
+  const overallConversionRate = controlOverview?.conversionRate ?? 0;
   const performanceTitle = campusType === 'school'
     ? 'Class Performance'
     : campusType === 'college'
@@ -119,12 +229,14 @@ export default function Dashboard() {
   const reminderBucketsRaw = {
     overdue: reminders?.overdue || [],
     dueToday: reminders?.dueToday || [],
+    recoveredOverdue: reminders?.previouslyOverdue || [],
     noActivity: reminders?.noActivity || [],
   };
 
   const reminderRows = [
     ...reminderBucketsRaw.overdue.map(item => ({ ...item, reminderType: 'overdue' })),
     ...reminderBucketsRaw.dueToday.map(item => ({ ...item, reminderType: 'dueToday' })),
+    ...reminderBucketsRaw.recoveredOverdue.map(item => ({ ...item, reminderType: 'recoveredOverdue' })),
     ...reminderBucketsRaw.noActivity.map(item => ({ ...item, reminderType: 'noActivity' })),
   ];
 
@@ -143,6 +255,7 @@ export default function Dashboard() {
   const filteredReminderBuckets = {
     overdue: filteredReminderRows.filter(item => item.reminderType === 'overdue'),
     dueToday: filteredReminderRows.filter(item => item.reminderType === 'dueToday'),
+    recoveredOverdue: filteredReminderRows.filter(item => item.reminderType === 'recoveredOverdue'),
     noActivity: filteredReminderRows.filter(item => item.reminderType === 'noActivity'),
   };
 
@@ -191,8 +304,18 @@ export default function Dashboard() {
     return true;
   });
   const selectedStaff = mergedStaffRows.find(s => s.id === selectedStaffId);
+  const selectedActivityWindow = ACTIVITY_TIME_FILTERS.find(opt => opt.value === activityTimeFilter);
+  const activityThresholdMs = selectedActivityWindow?.days
+    ? (Date.now() - (selectedActivityWindow.days * 24 * 60 * 60 * 1000))
+    : null;
+  const filteredRecentActivity = recentActivity.filter((act) => {
+    if (!activityThresholdMs) return true;
+    if (!act?.created_at) return false;
+    const time = new Date(act.created_at).getTime();
+    return Number.isFinite(time) && time >= activityThresholdMs;
+  });
   const followUpRemindersSection = (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 h-[34rem] flex flex-col mb-6">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 h-[34rem] flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-900">Follow-up Reminders</h3>
         <Link to="/inquiries?filter=overdue" className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1">
@@ -209,6 +332,7 @@ export default function Dashboard() {
           <option value="all">All Reminder Types</option>
           <option value="overdue">Overdue</option>
           <option value="dueToday">Due Today</option>
+          <option value="recoveredOverdue">Recovered Overdue</option>
           <option value="noActivity">No Contact 3+ Days</option>
         </select>
         <select
@@ -271,6 +395,33 @@ export default function Dashboard() {
           </div>
         )}
 
+        {filteredReminderBuckets.recoveredOverdue.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-1 mb-2">
+              <Clock className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="text-xs font-medium text-emerald-700">
+                Recovered Overdue ({filteredReminderBuckets.recoveredOverdue.length})
+              </span>
+            </div>
+            <div className="space-y-2">
+              {filteredReminderBuckets.recoveredOverdue.map(inq => (
+                <Link key={inq.id} to={`/inquiries/${inq.id}`} className="block rounded-lg border border-emerald-200 bg-emerald-50 p-3 hover:bg-emerald-100 transition-colors">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-sm font-medium text-gray-900">{inq.student_name}</span>
+                    <span className="text-[11px] text-emerald-700 text-right">
+                      Resolved: {inq.overdue_last_resolved_at ? formatDateTime(inq.overdue_last_resolved_at) : '-'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{inq.parent_name} - {inq.parent_phone}</p>
+                  <p className="text-[11px] text-emerald-800 mt-1">
+                    Previously overdue: {inq.last_overdue_date ? formatDate(inq.last_overdue_date) : '-'} | Resolved count: {inq.overdue_resolved_count || 0}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {filteredReminderBuckets.noActivity.length > 0 && (
           <div>
             <div className="flex items-center gap-1 mb-2">
@@ -297,6 +448,176 @@ export default function Dashboard() {
       </div>
     </div>
   );
+  const controlSnapshotSection = controlOverview && (
+    <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-5 h-[34rem] flex flex-col">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-gray-900">Control Snapshot</h3>
+        <p className="text-[11px] text-gray-400">As of {formatDate(controlOverview?.asOfDate)}</p>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-600">Low Risk Pool</span>
+              <span className="font-semibold text-emerald-700">{controlRisk?.lowCount || 0}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div
+                className="h-2 rounded-full bg-emerald-500"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    controlOverview?.activeInquiries
+                      ? ((controlRisk?.lowCount || 0) / controlOverview.activeInquiries) * 100
+                      : 0,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-600">Due Today</span>
+              <span className="font-semibold text-yellow-700">{controlOverview?.dueTodayCount || 0}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div
+                className="h-2 rounded-full bg-yellow-500"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    controlOverview?.activeInquiries
+                      ? ((controlOverview?.dueTodayCount || 0) / controlOverview.activeInquiries) * 100
+                      : 0,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-600">Overdue</span>
+              <span className="font-semibold text-red-600">{controlOverview?.overdueCount || 0}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div
+                className="h-2 rounded-full bg-red-500"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    controlOverview?.activeInquiries
+                      ? ((controlOverview?.overdueCount || 0) / controlOverview.activeInquiries) * 100
+                      : 0,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="text-gray-600">Recovered Overdue</span>
+              <span className="font-semibold text-emerald-700">{recoveredOverdueCount}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100">
+              <div
+                className="h-2 rounded-full bg-emerald-400"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    controlOverview?.activeInquiries
+                      ? (recoveredOverdueCount / controlOverview.activeInquiries) * 100
+                      : 0,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+          <p className="text-xs font-semibold text-emerald-700 mb-1">Why Low Risk?</p>
+          <p className="text-xs leading-5 text-emerald-900">{lowRiskDefinition}</p>
+        </div>
+
+        <div className="rounded-lg border border-red-100 bg-red-50 p-3">
+          <p className="text-xs font-semibold text-red-700 mb-2">Overdue Depth</p>
+          <div className="space-y-1 text-xs text-gray-700">
+            <div className="flex items-center justify-between">
+              <span>Oldest overdue since</span>
+              <span className="font-semibold text-gray-900">{oldestOverdueLabel}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Average delay</span>
+              <span className="font-semibold text-gray-900">{averageOverdueDaysLabel}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Recovered this month</span>
+              <span className="font-semibold text-emerald-700">{recoveredOverdueThisMonth}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Last recovered</span>
+              <span className="font-semibold text-gray-900">{lastRecoveredAtLabel}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Historically overdue (total)</span>
+              <span className="font-semibold text-gray-900">{historicalOverdueCount}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            <div className="rounded-md border border-red-100 bg-white p-2 text-center">
+              <p className="text-[11px] text-gray-500">1-3d</p>
+              <p className="text-sm font-semibold text-gray-900">{overdueAging.oneToThreeDays || 0}</p>
+            </div>
+            <div className="rounded-md border border-red-100 bg-white p-2 text-center">
+              <p className="text-[11px] text-gray-500">4-7d</p>
+              <p className="text-sm font-semibold text-gray-900">{overdueAging.fourToSevenDays || 0}</p>
+            </div>
+            <div className="rounded-md border border-red-100 bg-white p-2 text-center">
+              <p className="text-[11px] text-gray-500">8+d</p>
+              <p className="text-sm font-semibold text-gray-900">{overdueAging.eightPlusDays || 0}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+          <p className="text-xs font-semibold text-blue-700 mb-2">
+            {isAllCampuses ? 'School vs College' : `${campusControlCards[0]?.label} Snapshot`}
+          </p>
+          <div className="space-y-2">
+            {campusControlCards.map(item => (
+              <div key={item.label} className="rounded-md border border-blue-100 bg-white p-2">
+                <p className="text-xs font-semibold text-gray-800">{item.label}</p>
+                <div className="grid grid-cols-4 gap-1 mt-1 text-[11px] text-gray-600">
+                  <span>Total: {item.data.totalInquiries || 0}</span>
+                  <span>Active: {item.data.activeInquiries || 0}</span>
+                  <span>Due: {item.data.dueTodayCount || 0}</span>
+                  <span>Overdue: {item.data.overdueCount || 0}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 mt-1 text-[11px]">
+                  <span className="text-emerald-700">Low Risk: {item.data.lowRiskCount || 0}</span>
+                  <span className="text-blue-700">Recovered: {item.data.recoveredOverdueCount || 0}</span>
+                  <span className="text-gray-700">Historical: {item.data.historicalOverdueCount || 0}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg bg-gray-50 p-3 border border-gray-100">
+            <p className="text-xs text-gray-500">Total</p>
+            <p className="text-xl font-semibold text-gray-900">{controlOverview?.totalInquiries || 0}</p>
+          </div>
+          <div className="rounded-lg bg-gray-50 p-3 border border-gray-100">
+            <p className="text-xs text-gray-500">Conversion (This Month)</p>
+            <p className="text-xl font-semibold text-gray-900">{thisMonthConversionRate}%</p>
+            <p className="text-[11px] text-gray-500 mt-1">Overall: {overallConversionRate}%</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div>
@@ -312,7 +633,21 @@ export default function Dashboard() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+        <StatCard
+          title="Today"
+          value={admissionStats?.todayCount || 0}
+          icon={Clock}
+          color="purple"
+          subtitle="New inquiries"
+        />
+        <StatCard
+          title="This Month"
+          value={admissionStats?.thisMonth || 0}
+          icon={TrendingUp}
+          color="blue"
+          subtitle="Admissions this month"
+        />
         <StatCard
           title="Total Inquiries"
           value={admissionStats?.totalInquiries || 0}
@@ -327,13 +662,6 @@ export default function Dashboard() {
           subtitle="Active enrolled"
         />
         <StatCard
-          title="This Month"
-          value={admissionStats?.thisMonth || 0}
-          icon={TrendingUp}
-          color="purple"
-          subtitle={`${admissionStats?.todayCount || 0} today`}
-        />
-        <StatCard
           title="Conversion Rate"
           value={`${admissionStats?.conversionRate || 0}%`}
           icon={UserCheck}
@@ -343,124 +671,29 @@ export default function Dashboard() {
         <StatCard
           title="Follow-ups Due"
           value={followUpStats?.dueToday || 0}
-          icon={Clock}
+          icon={AlertTriangle}
           color={followUpStats?.overdue > 0 ? 'red' : 'yellow'}
-          subtitle={followUpStats?.overdue > 0 ? `${followUpStats.overdue} overdue` : 'On track'}
+          subtitle={
+            followUpStats?.overdue > 0
+              ? `${followUpStats.overdue} overdue · ${followUpStats?.recoveredOverdue || 0} recovered`
+              : `${followUpStats?.recoveredOverdue || 0} recovered`
+          }
         />
       </div>
 
-      {!isAdminOrAbove(user) && followUpRemindersSection}
+      {!isAdminOrAbove(user) && (
+        <div className="mb-6">
+          {followUpRemindersSection}
+        </div>
+      )}
 
       {/* Control Analytics */}
       {isAdminOrAbove(user) && controlOverview && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Active Pipeline</p>
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-emerald-50 text-emerald-600">
-                  <Workflow className="h-4 w-4" />
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{controlOverview.activeInquiries || 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Ready for follow-up</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-blue-100 p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Admissions Closed</p>
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-blue-50 text-blue-600">
-                  <CheckCircle2 className="h-4 w-4" />
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{controlOverview.admittedCount || 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Conversion: {controlOverview.conversionRate || 0}%</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-amber-100 p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Unassigned Inquiries</p>
-                <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-amber-50 text-amber-600">
-                  <UserX className="h-4 w-4" />
-                </span>
-              </div>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{controlOverview.unassignedCount || 0}</p>
-              <p className="text-xs text-gray-500 mt-1">Need ownership now</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-5 sm:col-span-2 xl:col-span-1">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Control Snapshot</h3>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-gray-600">Low Risk Pool</span>
-                    <span className="font-semibold text-emerald-700">{controlRisk?.lowCount || 0}</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100">
-                    <div
-                      className="h-2 rounded-full bg-emerald-500"
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          controlOverview?.activeInquiries
-                            ? ((controlRisk?.lowCount || 0) / controlOverview.activeInquiries) * 100
-                            : 0,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-gray-600">Due Today</span>
-                    <span className="font-semibold text-yellow-700">{controlOverview?.dueTodayCount || 0}</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100">
-                    <div
-                      className="h-2 rounded-full bg-yellow-500"
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          controlOverview?.activeInquiries
-                            ? ((controlOverview?.dueTodayCount || 0) / controlOverview.activeInquiries) * 100
-                            : 0,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-gray-600">Overdue</span>
-                    <span className="font-semibold text-red-600">{controlOverview?.overdueCount || 0}</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100">
-                    <div
-                      className="h-2 rounded-full bg-red-500"
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          controlOverview?.activeInquiries
-                            ? ((controlOverview?.overdueCount || 0) / controlOverview.activeInquiries) * 100
-                            : 0,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 mt-6">
-                <div className="rounded-lg bg-gray-50 p-3 border border-gray-100">
-                  <p className="text-xs text-gray-500">Total</p>
-                  <p className="text-xl font-semibold text-gray-900">{controlOverview?.totalInquiries || 0}</p>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-3 border border-gray-100">
-                  <p className="text-xs text-gray-500">Conversion</p>
-                  <p className="text-xl font-semibold text-gray-900">{controlOverview?.conversionRate || 0}%</p>
-                </div>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-6">
+            <div className="xl:col-span-8">{followUpRemindersSection}</div>
+            <div className="xl:col-span-4">{controlSnapshotSection}</div>
           </div>
-
-          {followUpRemindersSection}
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
             <div className="xl:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -497,7 +730,7 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">Area / Source Insights</h3>
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">Area Insights</h3>
               <div className="space-y-5">
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Top Areas</p>
@@ -655,7 +888,7 @@ export default function Dashboard() {
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip content={sourceTooltipContent} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="space-y-1 mt-2">
@@ -774,20 +1007,58 @@ export default function Dashboard() {
 
       {!isAdminOrAbove(user) && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            {recentActivity.slice(0, 10).map(act => (
-              <div key={act.id} className="flex items-start gap-3 text-sm">
-                <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
-                <div className="flex-1">
-                  <span className="text-gray-900">{act.action.replace(/\./g, ' ').replace(/_/g, ' ')}</span>
-                  <p className="text-xs text-gray-400">{relativeTime(act.created_at)}</p>
-                </div>
-              </div>
-            ))}
-            {recentActivity.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-4">No recent activity</p>
-            )}
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">Recent Activity</h3>
+            <select
+              value={activityTimeFilter}
+              onChange={e => setActivityTimeFilter(e.target.value)}
+              className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+            >
+              {ACTIVITY_TIME_FILTERS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Showing {filteredRecentActivity.length} of {recentActivity.length} activities
+          </p>
+          <div className="h-[26rem] overflow-y-auto pr-1">
+            <div className="space-y-3">
+              {filteredRecentActivity.map((act) => {
+                const inquiryTargetId = getActivityInquiryId(act);
+                const changedFields = getActivityChangedFields(act).map(formatActivityField);
+                const rowContent = (
+                  <div className="flex items-start gap-3 text-sm">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
+                    <div className="flex-1">
+                      <span className="text-gray-900">{formatActivityAction(act.action)}</span>
+                      {act.entity_type && <span className="text-gray-400"> ({act.entity_type} #{act.entity_id})</span>}
+                      {changedFields.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-1">Changed: {changedFields.join(', ')}</p>
+                      )}
+                      {inquiryTargetId && (
+                        <p className="text-xs text-primary-600 mt-1">Open inquiry #{inquiryTargetId}</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        {formatDateTime(act.created_at)} · {relativeTime(act.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                );
+                return inquiryTargetId ? (
+                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 -m-2 hover:bg-gray-50 transition-colors">
+                    {rowContent}
+                  </Link>
+                ) : (
+                  <div key={act.id} className="rounded-lg p-2 -m-2">
+                    {rowContent}
+                  </div>
+                );
+              })}
+              {filteredRecentActivity.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-4">No recent activity in selected time range</p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -795,22 +1066,59 @@ export default function Dashboard() {
       {/* Recent Activity for Admin (full width) */}
       {isAdminOrAbove(user) && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            {recentActivity.slice(0, 10).map(act => (
-              <div key={act.id} className="flex items-start gap-3 text-sm">
-                <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
-                <div className="flex-1">
-                  <span className="font-medium text-gray-900">{act.user?.name}</span>
-                  <span className="text-gray-500"> {act.action.replace(/\./g, ' ').replace(/_/g, ' ')}</span>
-                  {act.entity_type && <span className="text-gray-400"> ({act.entity_type} #{act.entity_id})</span>}
-                  <p className="text-xs text-gray-400">{relativeTime(act.created_at)}</p>
-                </div>
-              </div>
-            ))}
-            {recentActivity.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-4">No recent activity</p>
-            )}
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">Recent Activity</h3>
+            <select
+              value={activityTimeFilter}
+              onChange={e => setActivityTimeFilter(e.target.value)}
+              className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+            >
+              {ACTIVITY_TIME_FILTERS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[11px] text-gray-500 mb-3">
+            Showing {filteredRecentActivity.length} of {recentActivity.length} activities
+          </p>
+          <div className="h-[26rem] overflow-y-auto pr-1">
+            <div className="space-y-3">
+              {filteredRecentActivity.map((act) => {
+                const inquiryTargetId = getActivityInquiryId(act);
+                const changedFields = getActivityChangedFields(act).map(formatActivityField);
+                const rowContent = (
+                  <div className="flex items-start gap-3 text-sm">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
+                    <div className="flex-1">
+                      <span className="font-medium text-gray-900">{act.user?.name || 'System'}</span>
+                      <span className="text-gray-500"> {formatActivityAction(act.action)}</span>
+                      {act.entity_type && <span className="text-gray-400"> ({act.entity_type} #{act.entity_id})</span>}
+                      {changedFields.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-1">Changed: {changedFields.join(', ')}</p>
+                      )}
+                      {inquiryTargetId && (
+                        <p className="text-xs text-primary-600 mt-1">Open inquiry #{inquiryTargetId}</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1">
+                        {formatDateTime(act.created_at)} · {relativeTime(act.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                );
+                return inquiryTargetId ? (
+                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 -m-2 hover:bg-gray-50 transition-colors">
+                    {rowContent}
+                  </Link>
+                ) : (
+                  <div key={act.id} className="rounded-lg p-2 -m-2">
+                    {rowContent}
+                  </div>
+                );
+              })}
+              {filteredRecentActivity.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-4">No recent activity in selected time range</p>
+              )}
+            </div>
           </div>
         </div>
       )}

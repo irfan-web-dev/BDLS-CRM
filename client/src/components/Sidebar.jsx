@@ -10,6 +10,7 @@ import { getPortalTitle } from '../utils/portalBranding';
 const primaryNavigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Inquiries', href: '/inquiries', icon: UserSearch },
+  { name: 'Manual Entry', href: '/inquiries/manual-entry', icon: UserSearch },
   { name: 'Attendance', href: '/attendance', icon: ClipboardCheck },
   { name: 'Homework', href: '/homework', icon: BookOpen },
   { name: 'Communications', href: '/communications', icon: MessageSquare },

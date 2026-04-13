@@ -20,6 +20,7 @@ export default function InquiryEdit() {
   const [sources, setSources] = useState([]);
   const [tags, setTags] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [currentClassOption, setCurrentClassOption] = useState(null);
 
   const [areaOptions, setAreaOptions] = useState(LAHORE_AREAS);
   const [areaSearch, setAreaSearch] = useState('');
@@ -33,7 +34,7 @@ export default function InquiryEdit() {
     previous_institute: '', previous_marks_obtained: '', previous_total_marks: '', previous_major_subjects: '',
     special_needs: '', source_id: '', referral_parent_name: '',
     campus_id: user?.campus_id || '', package_name: '', package_amount: '', session_preference: '', assigned_staff_id: '',
-    priority: 'normal', notes: '', tag_ids: [],
+    inquiry_form_taken: '', priority: 'normal', notes: '', tag_ids: [],
   });
 
   useEffect(() => {
@@ -80,10 +81,13 @@ export default function InquiryEdit() {
   }, [form.campus_id, user?.role, campuses]);
 
   useEffect(() => {
-    if (form.class_applying_id && !classes.some(c => String(c.id) === String(form.class_applying_id))) {
+    if (!form.class_applying_id) return;
+    const inLoadedClasses = classes.some(c => String(c.id) === String(form.class_applying_id));
+    const isCurrentClass = currentClassOption && String(currentClassOption.id) === String(form.class_applying_id);
+    if (!inLoadedClasses && !isCurrentClass) {
       setForm(prev => ({ ...prev, class_applying_id: '' }));
     }
-  }, [classes]);
+  }, [classes, form.class_applying_id, currentClassOption]);
 
   async function loadData() {
     try {
@@ -110,6 +114,7 @@ export default function InquiryEdit() {
         referral_parent_name: inq.referral_parent_name || '', campus_id: inq.campus_id || '',
         package_name: inq.package_name || '', package_amount: inq.package_amount || '',
         session_preference: inq.session_preference || '', assigned_staff_id: inq.assigned_staff_id || '',
+        inquiry_form_taken: inq.inquiry_form_taken === true ? 'true' : (inq.inquiry_form_taken === false ? 'false' : ''),
         priority: inq.priority || 'normal', notes: inq.notes || '',
         tag_ids: inq.tags?.map(t => t.id) || [],
       });
@@ -117,6 +122,11 @@ export default function InquiryEdit() {
       setAreaSearch(inq.area || '');
       setCampuses(campRes.data);
       setTags(tagRes.data);
+      setCurrentClassOption(
+        inq.classApplying?.id
+          ? { id: inq.classApplying.id, name: inq.classApplying.name || `Class #${inq.classApplying.id}` }
+          : null
+      );
 
       if (isSuperAdmin(user) && campRes.data.length === 1) {
         const onlyCampusId = String(campRes.data[0].id);
@@ -131,41 +141,62 @@ export default function InquiryEdit() {
 
   async function loadScopedOptions() {
     try {
-      let classRes;
-      let staffRes;
-      let sourceRes;
+      let classPromise;
+      let staffPromise;
+      let sourcePromise;
 
       if (isSuperAdmin(user)) {
-        if (form.campus_id) {
-          const selected = campuses.find(c => String(c.id) === String(form.campus_id));
-          const sourceParams = selected?.campus_type ? { campus_type: selected.campus_type } : {};
-
-          [classRes, staffRes] = await Promise.all([
-            api.get('/classes', { params: { campus_id: form.campus_id } }),
-            isAdminOrAbove(user)
-              ? api.get('/users/staff/available', { params: { campus_id: form.campus_id } })
-              : Promise.resolve({ data: [] }),
-          ]);
-          sourceRes = await api.get('/settings/inquiry-sources', { params: sourceParams });
-          setClasses(classRes.data);
-          setStaff(staffRes?.data || []);
-          setSources(sourceRes.data || []);
-        } else {
+        if (!form.campus_id) {
           setClasses([]);
           setStaff([]);
           setSources([]);
+          return;
         }
+
+        const selected = campuses.find(c => String(c.id) === String(form.campus_id));
+        const sourceParams = selected?.campus_type ? { campus_type: selected.campus_type } : {};
+
+        classPromise = api.get('/classes', { params: { campus_id: form.campus_id } });
+        staffPromise = isAdminOrAbove(user)
+          ? api.get('/users/staff/available', { params: { campus_id: form.campus_id } })
+          : Promise.resolve({ data: [] });
+        sourcePromise = api.get('/settings/inquiry-sources', { params: sourceParams });
       } else {
-        [classRes, staffRes, sourceRes] = await Promise.all([
-          api.get('/classes'),
-          isAdminOrAbove(user)
-            ? api.get('/users/staff/available')
-            : Promise.resolve({ data: [] }),
-          api.get('/settings/inquiry-sources'),
-        ]);
-        setClasses(classRes.data);
-        setStaff(staffRes?.data || []);
-        setSources(sourceRes.data || []);
+        classPromise = api.get('/classes');
+        staffPromise = isAdminOrAbove(user)
+          ? api.get('/users/staff/available')
+          : Promise.resolve({ data: [] });
+        sourcePromise = api.get('/settings/inquiry-sources');
+      }
+
+      const [classResult, staffResult, sourceResult] = await Promise.allSettled([
+        classPromise,
+        staffPromise,
+        sourcePromise,
+      ]);
+
+      if (classResult.status === 'fulfilled') {
+        const classData = Array.isArray(classResult.value?.data)
+          ? classResult.value.data
+          : (Array.isArray(classResult.value?.data?.classes) ? classResult.value.data.classes : []);
+        setClasses(classData);
+      } else {
+        console.error('Failed to load classes for inquiry edit:', classResult.reason);
+        setClasses([]);
+      }
+
+      if (staffResult.status === 'fulfilled') {
+        setStaff(Array.isArray(staffResult.value?.data) ? staffResult.value.data : []);
+      } else {
+        console.error('Failed to load staff for inquiry edit:', staffResult.reason);
+        setStaff([]);
+      }
+
+      if (sourceResult.status === 'fulfilled') {
+        setSources(Array.isArray(sourceResult.value?.data) ? sourceResult.value.data : []);
+      } else {
+        console.error('Failed to load inquiry sources for inquiry edit:', sourceResult.reason);
+        setSources([]);
       }
     } catch (err) {
       console.error(err);
@@ -197,9 +228,13 @@ export default function InquiryEdit() {
       if (data.previous_marks_obtained) data.previous_marks_obtained = parseInt(data.previous_marks_obtained, 10);
       if (data.previous_total_marks) data.previous_total_marks = parseInt(data.previous_total_marks, 10);
       if (data.package_amount) data.package_amount = parseInt(data.package_amount, 10);
+      if (data.inquiry_form_taken !== null && data.inquiry_form_taken !== undefined) {
+        data.inquiry_form_taken = data.inquiry_form_taken === 'true';
+      }
       if (!isCollegeFlow) {
         data.package_name = null;
         data.package_amount = null;
+        data.inquiry_form_taken = null;
       }
 
       await api.put(`/inquiries/${id}`, data);
@@ -215,6 +250,9 @@ export default function InquiryEdit() {
 
   const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none';
   const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
+  const classOptions = currentClassOption && !classes.some(c => String(c.id) === String(currentClassOption.id))
+    ? [currentClassOption, ...classes]
+    : classes;
 
   function renderAreaInput() {
     return (
@@ -250,7 +288,7 @@ export default function InquiryEdit() {
             <label className={labelClass}>{isCollegeFlow ? 'Discipline *' : 'Class Applying For *'}</label>
             <select name="class_applying_id" value={form.class_applying_id} onChange={handleChange} required className={inputClass}>
               <option value="">{isSuperAdmin(user) && !form.campus_id ? 'Select campus first' : (isCollegeFlow ? 'Select discipline' : 'Select class')}</option>
-              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {classOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
 
@@ -327,6 +365,14 @@ export default function InquiryEdit() {
                 </div>
                 <div><label className={labelClass}>Package</label><input name="package_name" value={form.package_name} onChange={handleChange} className={inputClass} placeholder="e.g. Merit Scholarship" /></div>
                 <div><label className={labelClass}>Package Amount</label><input type="number" min="0" name="package_amount" value={form.package_amount} onChange={handleChange} className={inputClass} placeholder="e.g. 50000" /></div>
+                <div>
+                  <label className={labelClass}>Form Taken</label>
+                  <select name="inquiry_form_taken" value={form.inquiry_form_taken} onChange={handleChange} className={inputClass}>
+                    <option value="">Select</option>
+                    <option value="true">Taken</option>
+                    <option value="false">Not Taken</option>
+                  </select>
+                </div>
               </>
             ) : (
               isSuperAdmin(user) && (

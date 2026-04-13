@@ -82,7 +82,7 @@ export default function Reports() {
       ['Total Inquiries', admissionStats.totalInquiries],
       ['This Month', admissionStats.thisMonth],
       ['Today', admissionStats.todayCount],
-      ['Conversion Rate', `${admissionStats.conversionRate}%`],
+      ['Conversion Rate (This Month)', `${admissionStats.conversionRate}%`],
       [],
       ['Status', 'Count'],
       ...safeList(admissionStats.byStatus).map((s) => {
@@ -272,7 +272,7 @@ export default function Reports() {
         ['Total Inquiries', admissionStats.totalInquiries],
         ['This Month', admissionStats.thisMonth],
         ['Today', admissionStats.todayCount],
-        ['Conversion Rate', `${admissionStats.conversionRate}%`],
+        ['Conversion Rate (This Month)', `${admissionStats.conversionRate}%`],
         [],
         ['Status', 'Count'],
         ...safeList(admissionStats.byStatus).map((s) => {
@@ -427,7 +427,7 @@ export default function Reports() {
               <p className="text-2xl font-bold text-blue-600">{admissionStats?.thisMonth ?? 0}</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Conversion Rate</p>
+              <p className="text-xs text-gray-500">Conversion Rate (This Month)</p>
               <p className="text-2xl font-bold text-green-600">{admissionStats?.conversionRate ?? 0}%</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
@@ -747,20 +747,6 @@ export default function Reports() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white border rounded-lg p-4 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Information Officer Signature</p>
-                  <div className="h-12 border-b border-dashed border-gray-400" />
-                </div>
-                <div className="bg-white border rounded-lg p-4 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Admission Coordinator Signature</p>
-                  <div className="h-12 border-b border-dashed border-gray-400" />
-                </div>
-                <div className="bg-white border rounded-lg p-4 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Principal Signature</p>
-                  <div className="h-12 border-b border-dashed border-gray-400" />
-                </div>
-              </div>
             </>
           )}
         </div>
@@ -789,7 +775,7 @@ export default function Reports() {
               <p className="text-2xl font-bold text-purple-600">{admissionStats.todayCount}</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
-              <p className="text-xs text-gray-500">Conversion Rate</p>
+              <p className="text-xs text-gray-500">Conversion Rate (This Month)</p>
               <p className="text-2xl font-bold text-green-600">{admissionStats.conversionRate}%</p>
             </div>
           </div>

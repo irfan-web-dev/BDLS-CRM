@@ -5,6 +5,7 @@ import {
 } from '../models/index.js';
 import { authenticate } from '../middleware/auth.js';
 import { authorize, scopeToCampus } from '../middleware/authorize.js';
+import { ACTIVE_INQUIRY_STATUSES, todayDateOnly } from '../utils/overdueTracking.js';
 
 const router = Router();
 const VALID_CAMPUS_TYPES = ['school', 'college'];
@@ -110,17 +111,60 @@ router.get('/admission-stats', async (req, res) => {
     });
     const conversionRate = thisMonth > 0 ? ((admittedThisMonth / thisMonth) * 100).toFixed(1) : 0;
 
-    // By source
-    const bySource = await Inquiry.findAll({
+    // By source with campus-type breakdown (for source-level hover details in dashboard)
+    const bySourceRaw = await Inquiry.findAll({
       where,
       attributes: [
-        'source_id',
+        [sequelize.literal(`COALESCE("source"."name", 'Unknown')`), 'source_name'],
+        [sequelize.col('campus.campus_type'), 'campus_type'],
         [sequelize.fn('COUNT', sequelize.col('Inquiry.id')), 'count'],
       ],
-      include: [{ model: InquirySource, as: 'source', attributes: ['name'] }],
-      group: ['source_id', 'source.id', 'source.name'],
+      include: [
+        { model: InquirySource, as: 'source', attributes: [], required: false },
+        { model: Campus, as: 'campus', attributes: [], required: false },
+      ],
+      group: [sequelize.col('source.name'), sequelize.col('campus.campus_type')],
       raw: true,
     });
+
+    const sourceMap = new Map();
+    bySourceRaw.forEach((row) => {
+      const sourceName = row.source_name || 'Unknown';
+      const campusTypeKey = row.campus_type === 'college'
+        ? 'college'
+        : row.campus_type === 'school'
+          ? 'school'
+          : 'unknown';
+      const count = numberOrZero(row.count);
+
+      if (!sourceMap.has(sourceName)) {
+        sourceMap.set(sourceName, {
+          name: sourceName,
+          count: 0,
+          schoolCount: 0,
+          collegeCount: 0,
+          unknownCount: 0,
+        });
+      }
+
+      const entry = sourceMap.get(sourceName);
+      entry.count += count;
+      if (campusTypeKey === 'school') entry.schoolCount += count;
+      if (campusTypeKey === 'college') entry.collegeCount += count;
+      if (campusTypeKey === 'unknown') entry.unknownCount += count;
+    });
+
+    const bySourceDetailed = Array.from(sourceMap.values())
+      .sort((a, b) => b.count - a.count)
+      .map(entry => ({
+        name: entry.name,
+        count: entry.count,
+        breakdown: {
+          school: entry.schoolCount,
+          college: entry.collegeCount,
+          unknown: entry.unknownCount,
+        },
+      }));
 
     const studentWhere = {
       deleted_at: null,
@@ -146,10 +190,8 @@ router.get('/admission-stats', async (req, res) => {
       todayCount,
       conversionRate: parseFloat(conversionRate),
       byStatus,
-      bySource: bySource.map(s => ({
-        name: s['source.name'] || 'Unknown',
-        count: parseInt(s.count),
-      })),
+      bySource: bySourceDetailed.map(s => ({ name: s.name, count: s.count })),
+      bySourceDetailed,
     });
   } catch (error) {
     console.error('Admission stats error:', error);
@@ -357,13 +399,13 @@ router.get('/complete-report', authorize('super_admin', 'admin', 'staff'), async
 // GET /api/dashboard/follow-up-stats
 router.get('/follow-up-stats', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayDateOnly();
     const baseWhere = await buildInquiryWhere(req);
     if (req.user.role === 'staff') {
       baseWhere.assigned_staff_id = req.user.id;
     }
 
-    const activeStatuses = { [Op.notIn]: ['admitted', 'not_interested', 'lost', 'no_response'] };
+    const activeStatuses = { [Op.in]: ACTIVE_INQUIRY_STATUSES };
 
     const dueToday = await Inquiry.count({
       where: { ...baseWhere, next_follow_up_date: today, status: activeStatuses },
@@ -374,6 +416,25 @@ router.get('/follow-up-stats', async (req, res) => {
         ...baseWhere,
         next_follow_up_date: { [Op.lt]: today, [Op.ne]: null },
         status: activeStatuses,
+      },
+    });
+
+    const historicallyOverdue = await Inquiry.count({
+      where: {
+        ...baseWhere,
+        was_ever_overdue: true,
+      },
+    });
+
+    const recoveredOverdue = await Inquiry.count({
+      where: {
+        ...baseWhere,
+        status: activeStatuses,
+        was_ever_overdue: true,
+        [Op.or]: [
+          { next_follow_up_date: null },
+          { next_follow_up_date: { [Op.gte]: today } },
+        ],
       },
     });
 
@@ -401,7 +462,22 @@ router.get('/follow-up-stats', async (req, res) => {
       distinct: true,
     });
 
-    res.json({ dueToday, overdue, completedThisMonth });
+    const recoveredOverdueThisMonth = await Inquiry.count({
+      where: {
+        ...baseWhere,
+        was_ever_overdue: true,
+        overdue_last_resolved_at: { [Op.gte]: startOfMonth },
+      },
+    });
+
+    res.json({
+      dueToday,
+      overdue,
+      completedThisMonth,
+      historicallyOverdue,
+      recoveredOverdue,
+      recoveredOverdueThisMonth,
+    });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -505,7 +581,7 @@ router.get('/communication-stats', async (req, res) => {
     const staffRoleWhere = staffRoleIds.length ? { [Op.in]: staffRoleIds } : -1;
 
     // Total active inquiries (not closed)
-    const activeStatuses = ['new', 'contacted_attempt_1', 'contacted_connected', 'follow_up_scheduled', 'visit_scheduled', 'visit_completed', 'form_issued', 'form_submitted', 'documents_pending'];
+    const activeStatuses = ACTIVE_INQUIRY_STATUSES;
     const totalActive = await Inquiry.count({ where: { ...where, status: { [Op.in]: activeStatuses } } });
 
     // Contacted (have at least 1 follow-up)
@@ -619,12 +695,17 @@ router.get('/recent-activity', async (req, res) => {
     if (req.user.role === 'staff') {
       where.user_id = req.user.id;
     }
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 200)
+      : 100;
 
     const activities = await AuditLog.findAll({
       where,
+      attributes: ['id', 'action', 'entity_type', 'entity_id', 'old_values', 'new_values', 'created_at', 'user_id'],
       include: [{ model: User, as: 'user', attributes: ['id', 'name'] }],
       order: [['created_at', 'DESC']],
-      limit: 20,
+      limit,
     });
 
     res.json(activities);
@@ -637,28 +718,64 @@ router.get('/recent-activity', async (req, res) => {
 router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, res) => {
   try {
     const inquiryWhere = await buildInquiryWhere(req);
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayDateOnly();
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const sevenDaysAgoDate = sevenDaysAgo.split('T')[0];
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const activeStatuses = ['new', 'contacted_attempt_1', 'contacted_connected', 'follow_up_scheduled', 'visit_scheduled', 'visit_completed', 'form_issued', 'form_submitted', 'documents_pending'];
-
-    const baseWhere = { ...inquiryWhere, status: { [Op.in]: activeStatuses } };
-
-    const highRiskWhere = {
-      ...baseWhere,
+    const activeStatuses = ACTIVE_INQUIRY_STATUSES;
+    const highRiskTriggers = {
       [Op.or]: [
         { next_follow_up_date: { [Op.lt]: today, [Op.ne]: null } },
         { last_contact_date: { [Op.lt]: sevenDaysAgo } },
-        { last_contact_date: null, inquiry_date: { [Op.lt]: sevenDaysAgo.split('T')[0] } },
+        { last_contact_date: null, inquiry_date: { [Op.lt]: sevenDaysAgoDate } },
       ],
+    };
+    const mediumRiskTriggers = {
+      [Op.or]: [
+        { next_follow_up_date: { [Op.eq]: today } },
+        { last_contact_date: { [Op.gte]: sevenDaysAgo, [Op.lt]: threeDaysAgo } },
+      ],
+    };
+    const activeStatusSql = activeStatuses.map(status => `'${status}'`).join(',');
+    const overdueSqlCondition = `"Inquiry"."status" IN (${activeStatusSql}) AND "Inquiry"."next_follow_up_date" < '${today}' AND "Inquiry"."next_follow_up_date" IS NOT NULL`;
+    const highRiskTriggerSqlCondition = `
+      ${overdueSqlCondition}
+      OR "Inquiry"."last_contact_date" < '${sevenDaysAgo}'
+      OR ("Inquiry"."last_contact_date" IS NULL AND "Inquiry"."inquiry_date" < '${sevenDaysAgoDate}')
+    `;
+    const mediumRiskTriggerSqlCondition = `
+      "Inquiry"."next_follow_up_date" = '${today}'
+      OR ("Inquiry"."last_contact_date" >= '${sevenDaysAgo}' AND "Inquiry"."last_contact_date" < '${threeDaysAgo}')
+    `;
+    const highRiskSqlCondition = `"Inquiry"."status" IN (${activeStatusSql}) AND (${highRiskTriggerSqlCondition})`;
+    const mediumRiskSqlCondition = `"Inquiry"."status" IN (${activeStatusSql}) AND NOT (${highRiskTriggerSqlCondition}) AND (${mediumRiskTriggerSqlCondition})`;
+    const recoveredOverdueSqlCondition = `"Inquiry"."status" IN (${activeStatusSql}) AND "Inquiry"."was_ever_overdue" = TRUE AND ("Inquiry"."next_follow_up_date" IS NULL OR "Inquiry"."next_follow_up_date" >= '${today}')`;
+
+    const baseWhere = { ...inquiryWhere, status: { [Op.in]: activeStatuses } };
+    const currentOverdueWhere = {
+      ...baseWhere,
+      next_follow_up_date: { [Op.lt]: today, [Op.ne]: null },
+    };
+    const recoveredOverdueWhere = {
+      ...baseWhere,
+      was_ever_overdue: true,
+      [Op.or]: [
+        { next_follow_up_date: null },
+        { next_follow_up_date: { [Op.gte]: today } },
+      ],
+    };
+
+    const highRiskWhere = {
+      ...baseWhere,
+      ...highRiskTriggers,
     };
 
     const mediumRiskWhere = {
       ...baseWhere,
-      [Op.or]: [
-        { next_follow_up_date: { [Op.eq]: today } },
-        { last_contact_date: { [Op.gte]: sevenDaysAgo, [Op.lt]: threeDaysAgo } },
+      [Op.and]: [
+        { [Op.not]: highRiskTriggers },
+        mediumRiskTriggers,
       ],
     };
 
@@ -667,20 +784,30 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       activeInquiries,
       admittedCount,
       overdueCount,
+      historicallyOverdueCount,
+      recoveredOverdueCount,
+      recoveredOverdueThisMonth,
       dueTodayCount,
       unassignedCount,
       highRiskCount,
       mediumRiskCount,
       highRiskList,
       mediumRiskList,
+      campusBreakdownRaw,
+      overdueInsightsRaw,
+      overdueResolutionInsightsRaw,
     ] = await Promise.all([
       Inquiry.count({ where: inquiryWhere }),
       Inquiry.count({ where: baseWhere }),
       Inquiry.count({ where: { ...inquiryWhere, status: 'admitted' } }),
+      Inquiry.count({ where: currentOverdueWhere }),
+      Inquiry.count({ where: { ...inquiryWhere, was_ever_overdue: true } }),
+      Inquiry.count({ where: recoveredOverdueWhere }),
       Inquiry.count({
         where: {
-          ...baseWhere,
-          next_follow_up_date: { [Op.lt]: today, [Op.ne]: null },
+          ...inquiryWhere,
+          was_ever_overdue: true,
+          overdue_last_resolved_at: { [Op.gte]: startOfMonth },
         },
       }),
       Inquiry.count({ where: { ...baseWhere, next_follow_up_date: today } }),
@@ -701,6 +828,46 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
         order: [['next_follow_up_date', 'ASC'], ['updated_at', 'ASC']],
         limit: 8,
       }),
+      Inquiry.findAll({
+        where: inquiryWhere,
+        attributes: [
+          [sequelize.col('campus.campus_type'), 'campus_type'],
+          [sequelize.fn('COUNT', sequelize.col('Inquiry.id')), 'total_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN "Inquiry"."status" IN (${activeStatusSql}) THEN 1 ELSE 0 END`)), 'active_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ${overdueSqlCondition} THEN 1 ELSE 0 END`)), 'overdue_count'],
+          [sequelize.fn('SUM', sequelize.literal('CASE WHEN "Inquiry"."was_ever_overdue" = TRUE THEN 1 ELSE 0 END')), 'historical_overdue_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ${recoveredOverdueSqlCondition} THEN 1 ELSE 0 END`)), 'recovered_overdue_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN "Inquiry"."status" IN (${activeStatusSql}) AND "Inquiry"."next_follow_up_date" = '${today}' THEN 1 ELSE 0 END`)), 'due_today_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ${highRiskSqlCondition} THEN 1 ELSE 0 END`)), 'high_risk_count'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ${mediumRiskSqlCondition} THEN 1 ELSE 0 END`)), 'medium_risk_count'],
+        ],
+        include: [{ model: Campus, as: 'campus', attributes: [], required: false }],
+        group: [sequelize.col('campus.campus_type')],
+        raw: true,
+      }),
+      Inquiry.findOne({
+        where: currentOverdueWhere,
+        attributes: [
+          [sequelize.fn('MIN', sequelize.col('next_follow_up_date')), 'oldest_date'],
+          [sequelize.fn('MAX', sequelize.literal(`('${today}'::date - "Inquiry"."next_follow_up_date")`)), 'max_days_overdue'],
+          [sequelize.fn('AVG', sequelize.literal(`('${today}'::date - "Inquiry"."next_follow_up_date")`)), 'avg_days_overdue'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ('${today}'::date - "Inquiry"."next_follow_up_date") BETWEEN 1 AND 3 THEN 1 ELSE 0 END`)), 'age_1_3'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ('${today}'::date - "Inquiry"."next_follow_up_date") BETWEEN 4 AND 7 THEN 1 ELSE 0 END`)), 'age_4_7'],
+          [sequelize.fn('SUM', sequelize.literal(`CASE WHEN ('${today}'::date - "Inquiry"."next_follow_up_date") >= 8 THEN 1 ELSE 0 END`)), 'age_8_plus'],
+        ],
+        raw: true,
+      }),
+      Inquiry.findOne({
+        where: {
+          ...inquiryWhere,
+          was_ever_overdue: true,
+          overdue_last_resolved_at: { [Op.ne]: null },
+        },
+        attributes: [
+          [sequelize.fn('MAX', sequelize.col('overdue_last_resolved_at')), 'last_resolved_at'],
+        ],
+        raw: true,
+      }),
     ]);
 
     const classPerformanceRaw = await Inquiry.findAll({
@@ -709,8 +876,8 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
         'class_applying_id',
         [sequelize.fn('COUNT', sequelize.col('Inquiry.id')), 'total_count'],
         [sequelize.fn('SUM', sequelize.literal("CASE WHEN \"Inquiry\".\"status\"='admitted' THEN 1 ELSE 0 END")), 'admitted_count'],
-        [sequelize.fn('SUM', sequelize.literal("CASE WHEN \"Inquiry\".\"status\" IN ('new','contacted_attempt_1','contacted_connected','follow_up_scheduled','visit_scheduled','visit_completed','form_issued','form_submitted','documents_pending') THEN 1 ELSE 0 END")), 'active_count'],
-        [sequelize.fn('SUM', sequelize.literal(`CASE WHEN "Inquiry"."status" IN ('new','contacted_attempt_1','contacted_connected','follow_up_scheduled','visit_scheduled','visit_completed','form_issued','form_submitted','documents_pending') AND "Inquiry"."next_follow_up_date" < '${today}' AND "Inquiry"."next_follow_up_date" IS NOT NULL THEN 1 ELSE 0 END`)), 'overdue_count'],
+        [sequelize.fn('SUM', sequelize.literal(`CASE WHEN "Inquiry"."status" IN (${activeStatusSql}) THEN 1 ELSE 0 END`)), 'active_count'],
+        [sequelize.fn('SUM', sequelize.literal(`CASE WHEN "Inquiry"."status" IN (${activeStatusSql}) AND "Inquiry"."next_follow_up_date" < '${today}' AND "Inquiry"."next_follow_up_date" IS NOT NULL THEN 1 ELSE 0 END`)), 'overdue_count'],
       ],
       include: [{ model: ClassLevel, as: 'classApplying', attributes: ['id', 'name'] }],
       group: ['class_applying_id', 'classApplying.id', 'classApplying.name'],
@@ -809,6 +976,39 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       raw: true,
     });
 
+    const emptyCampusMetrics = {
+      totalInquiries: 0,
+      activeInquiries: 0,
+      lowRiskCount: 0,
+      dueTodayCount: 0,
+      overdueCount: 0,
+      historicalOverdueCount: 0,
+      recoveredOverdueCount: 0,
+    };
+    const campusBreakdown = {
+      school: { ...emptyCampusMetrics },
+      college: { ...emptyCampusMetrics },
+    };
+    campusBreakdownRaw.forEach((row) => {
+      const type = row.campus_type;
+      if (type !== 'school' && type !== 'college') return;
+      const activeCount = numberOrZero(row.active_count);
+      const highRiskCampus = numberOrZero(row.high_risk_count);
+      const mediumRiskCampus = numberOrZero(row.medium_risk_count);
+      campusBreakdown[type] = {
+        totalInquiries: numberOrZero(row.total_count),
+        activeInquiries: activeCount,
+        lowRiskCount: Math.max(activeCount - highRiskCampus - mediumRiskCampus, 0),
+        dueTodayCount: numberOrZero(row.due_today_count),
+        overdueCount: numberOrZero(row.overdue_count),
+        historicalOverdueCount: numberOrZero(row.historical_overdue_count),
+        recoveredOverdueCount: numberOrZero(row.recovered_overdue_count),
+      };
+    });
+
+    const averageDaysRaw = Number.parseFloat(overdueInsightsRaw?.avg_days_overdue ?? 0);
+    const averageDaysOverdue = Number.isFinite(averageDaysRaw) ? Number.parseFloat(averageDaysRaw.toFixed(1)) : 0;
+
     res.json({
       overview: {
         totalInquiries,
@@ -816,16 +1016,40 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
         admittedCount,
         conversionRate: totalInquiries > 0 ? Number.parseFloat(((admittedCount / totalInquiries) * 100).toFixed(1)) : 0,
         overdueCount,
+        historicallyOverdueCount,
+        recoveredOverdueCount,
+        recoveredOverdueThisMonth,
         dueTodayCount,
         unassignedCount,
+        asOfDate: today,
       },
       risk: {
         highCount: highRiskCount,
         mediumCount: mediumRiskCount,
         lowCount: Math.max(activeInquiries - highRiskCount - mediumRiskCount, 0),
+        lowDefinition: 'Low Risk = active inquiries with no overdue follow-up, no due-today follow-up, and healthy recent contact progress.',
         highList: highRiskList,
         mediumList: mediumRiskList,
       },
+      overdue: {
+        asOfDate: today,
+        oldestDate: overdueInsightsRaw?.oldest_date || null,
+        oldestDaysOverdue: numberOrZero(overdueInsightsRaw?.max_days_overdue),
+        averageDaysOverdue,
+        agingBuckets: {
+          oneToThreeDays: numberOrZero(overdueInsightsRaw?.age_1_3),
+          fourToSevenDays: numberOrZero(overdueInsightsRaw?.age_4_7),
+          eightPlusDays: numberOrZero(overdueInsightsRaw?.age_8_plus),
+        },
+        history: {
+          totalHistoricallyOverdue: historicallyOverdueCount,
+          currentlyOverdue: overdueCount,
+          recoveredOverdue: recoveredOverdueCount,
+          recoveredThisMonth: recoveredOverdueThisMonth,
+          lastRecoveredAt: overdueResolutionInsightsRaw?.last_resolved_at || null,
+        },
+      },
+      campusBreakdown,
       classPerformance,
       staffControl: staffControl.sort((a, b) => b.activityScore - a.activityScore),
       topAreas: topAreasRaw.map(item => ({ name: item.area, count: numberOrZero(item.count) })),

@@ -297,6 +297,11 @@ export default function InquiryList() {
                           F/U: {formatDate(inq.next_follow_up_date)}
                         </span>
                       )}
+                      {!inq.next_follow_up_date && inq.was_ever_overdue && (
+                        <span className="text-emerald-700 font-medium">
+                          Previously overdue
+                        </span>
+                      )}
                       {inq.assignedStaff && <span>{inq.assignedStaff.name}</span>}
                     </div>
                   </div>
@@ -338,9 +343,16 @@ export default function InquiryList() {
                       <td className="px-4 py-3"><PriorityBadge priority={inq.priority} /></td>
                       <td className="px-4 py-3">
                         {inq.next_follow_up_date ? (
-                          <span className={`text-xs ${isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
-                            {formatDate(inq.next_follow_up_date)}
-                          </span>
+                          <div className="flex flex-col">
+                            <span className={`text-xs ${isOverdue(inq.next_follow_up_date) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
+                              {formatDate(inq.next_follow_up_date)}
+                            </span>
+                            {inq.was_ever_overdue && !isOverdue(inq.next_follow_up_date) && (
+                              <span className="text-[11px] text-emerald-700">Recovered overdue</span>
+                            )}
+                          </div>
+                        ) : inq.was_ever_overdue ? (
+                          <span className="text-xs text-emerald-700 font-medium">Previously overdue</span>
                         ) : (
                           <span className="text-xs text-gray-400">-</span>
                         )}

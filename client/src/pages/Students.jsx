@@ -114,6 +114,9 @@ export default function Students() {
   const activeStudents = students.filter(s => s.is_active).length;
   const schoolStudents = students.filter(s => (s.campus?.campus_type || 'school') === 'school').length;
   const collegeStudents = students.filter(s => (s.campus?.campus_type || 'school') === 'college').length;
+  const isAllCampuses = isSuperAdmin(user) && campusType === 'all';
+  const scopedTypeLabel = campusTypeLabel(campusType === 'all' ? (user?.campus?.campus_type || 'school') : campusType);
+  const scopedStudents = (campusType === 'college') ? collegeStudents : schoolStudents;
 
   if (loading) return <LoadingSpinner />;
 
@@ -128,7 +131,7 @@ export default function Students() {
         <CampusTypeTabs value={campusType} onChange={setCampusType} includeAll className="mb-4" />
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${isAllCampuses ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-4 mb-6`}>
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
           <p className="text-xs text-gray-500">Total Students</p>
           <p className="text-2xl font-bold text-gray-900">{totalStudents}</p>
@@ -137,14 +140,23 @@ export default function Students() {
           <p className="text-xs text-gray-500">Active</p>
           <p className="text-2xl font-bold text-green-600">{activeStudents}</p>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500">School</p>
-          <p className="text-2xl font-bold text-blue-600">{schoolStudents}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-xs text-gray-500">College</p>
-          <p className="text-2xl font-bold text-purple-600">{collegeStudents}</p>
-        </div>
+        {isAllCampuses ? (
+          <>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p className="text-xs text-gray-500">School</p>
+              <p className="text-2xl font-bold text-blue-600">{schoolStudents}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+              <p className="text-xs text-gray-500">College</p>
+              <p className="text-2xl font-bold text-purple-600">{collegeStudents}</p>
+            </div>
+          </>
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <p className="text-xs text-gray-500">{scopedTypeLabel}</p>
+            <p className={`text-2xl font-bold ${campusType === 'college' ? 'text-purple-600' : 'text-blue-600'}`}>{scopedStudents}</p>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100">

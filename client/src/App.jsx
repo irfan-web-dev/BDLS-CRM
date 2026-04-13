@@ -9,6 +9,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import InquiryList from './pages/inquiries/InquiryList';
 import InquiryCreate from './pages/inquiries/InquiryCreate';
+import InquiryManualCreate from './pages/inquiries/InquiryManualCreate';
 import InquiryDetail from './pages/inquiries/InquiryDetail';
 import InquiryEdit from './pages/inquiries/InquiryEdit';
 
@@ -50,6 +51,7 @@ export default function App() {
             {/* Inquiries */}
             <Route path="/inquiries" element={<InquiryList />} />
             <Route path="/inquiries/new" element={<InquiryCreate />} />
+            <Route path="/inquiries/manual-entry" element={<InquiryManualCreate />} />
             <Route path="/inquiries/:id" element={<InquiryDetail />} />
             <Route path="/inquiries/:id/edit" element={<InquiryEdit />} />
 

@@ -106,6 +106,10 @@ const Inquiry = sequelize.define('Inquiry', {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  inquiry_form_taken: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+  },
   campus_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -161,7 +165,42 @@ const Inquiry = sequelize.define('Inquiry', {
     type: DataTypes.DATEONLY,
     allowNull: true,
   },
+  was_ever_overdue: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  first_overdue_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
+  last_overdue_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
+  overdue_resolved_count: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+  overdue_last_resolved_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
   converted_to_student_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  is_sibling: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
+  sibling_of_inquiry_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  sibling_group_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
   },

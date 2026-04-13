@@ -8,16 +8,158 @@ import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate, formatDateTime, relativeTime, isOverdue } from '../../utils/helpers';
 import { INQUIRY_STATUSES, FOLLOW_UP_TYPES, INTEREST_LEVELS } from '../../utils/constants';
+import { isAdminOrAbove } from '../../utils/roleUtils';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Modal from '../../components/ui/Modal';
 import Badge from '../../components/ui/Badge';
 import { InquiryStatusBadge, PriorityBadge } from '../../components/ui/StatusBadge';
 
+const HISTORY_FIELD_LABELS = {
+  parent_name: 'Parent Name',
+  relationship: 'Relationship',
+  parent_phone: 'Parent Phone',
+  parent_whatsapp: 'Parent WhatsApp',
+  parent_email: 'Parent Email',
+  city: 'City',
+  area: 'Area',
+  student_name: 'Student Name',
+  date_of_birth: 'Date of Birth',
+  gender: 'Gender',
+  student_phone: 'Student Phone',
+  class_applying_id: 'Class Applying',
+  current_school: 'Current School',
+  previous_institute: 'Previous Institute',
+  previous_marks_obtained: 'Marks Obtained',
+  previous_total_marks: 'Total Marks',
+  previous_major_subjects: 'Major Subjects',
+  special_needs: 'Special Needs',
+  inquiry_date: 'Inquiry Date',
+  source_id: 'Source',
+  referral_parent_name: 'Referral Parent',
+  package_name: 'Package',
+  package_amount: 'Package Amount',
+  inquiry_form_taken: 'Form Taken',
+  campus_id: 'Campus',
+  session_preference: 'Session Preference',
+  assigned_staff_id: 'Assigned Staff',
+  priority: 'Priority',
+  status: 'Status',
+  status_changed_at: 'Status Changed At',
+  interest_level: 'Interest Level',
+  last_contact_date: 'Last Contact Date',
+  next_follow_up_date: 'Next Follow-up Date',
+  was_ever_overdue: 'Was Ever Overdue',
+  first_overdue_date: 'First Overdue Date',
+  last_overdue_date: 'Last Overdue Date',
+  overdue_resolved_count: 'Overdue Resolved Count',
+  overdue_last_resolved_at: 'Last Overdue Resolved At',
+  is_sibling: 'Sibling Inquiry',
+  sibling_of_inquiry_id: 'Linked Sibling Inquiry',
+  sibling_group_id: 'Sibling Group',
+  notes: 'Notes',
+  tag_ids: 'Tags',
+};
+
+function formatHistoryKey(key) {
+  if (HISTORY_FIELD_LABELS[key]) return HISTORY_FIELD_LABELS[key];
+  return String(key || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatHistoryValue(key, value, lookups = {}) {
+  if (value === null || value === undefined || value === '') return '-';
+  const normalizedKey = String(key || '');
+  const {
+    campusById = {},
+    staffById = {},
+    classById = {},
+    sourceById = {},
+    tagById = {},
+  } = lookups;
+
+  const resolveLabel = (map, rawValue) => {
+    if (rawValue === null || rawValue === undefined || rawValue === '') return null;
+    const mapKey = String(rawValue);
+    return map[mapKey] || map[rawValue] || null;
+  };
+
+  if (normalizedKey === 'campus_id') {
+    const label = resolveLabel(campusById, value);
+    return label || `Campus #${value}`;
+  }
+  if (normalizedKey === 'assigned_staff_id') {
+    const label = resolveLabel(staffById, value);
+    return label || `Staff #${value}`;
+  }
+  if (normalizedKey === 'class_applying_id') {
+    const label = resolveLabel(classById, value);
+    return label || `Class #${value}`;
+  }
+  if (normalizedKey === 'source_id') {
+    const label = resolveLabel(sourceById, value);
+    return label || `Source #${value}`;
+  }
+  if (normalizedKey === 'tag_ids' && Array.isArray(value)) {
+    if (!value.length) return '-';
+    return value.map((tagId) => resolveLabel(tagById, tagId) || `Tag #${tagId}`).join(', ');
+  }
+  if (normalizedKey === 'inquiry_form_taken') {
+    if (typeof value === 'boolean') return value ? 'Taken' : 'Not Taken';
+    const normalizedValue = String(value).toLowerCase();
+    if (normalizedValue === 'true') return 'Taken';
+    if (normalizedValue === 'false') return 'Not Taken';
+    return '-';
+  }
+
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '-';
+  if (typeof value === 'string') {
+    if (value.includes('T') && !Number.isNaN(Date.parse(value))) return formatDateTime(value);
+    return value.replace(/_/g, ' ');
+  }
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function actionLabel(action) {
+  if (action === 'inquiry.create') return 'Created';
+  if (action === 'inquiry.update') return 'Updated';
+  if (action === 'inquiry.status_change') return 'Status Changed';
+  if (action === 'inquiry.assign') return 'Assigned';
+  if (action === 'inquiry.delete') return 'Deleted';
+  return String(action || 'Unknown').replace(/\./g, ' ').replace(/_/g, ' ');
+}
+
+function deriveChangedFields(oldValues, newValues) {
+  const oldObj = oldValues && typeof oldValues === 'object' ? oldValues : {};
+  const newObj = newValues && typeof newValues === 'object' ? newValues : {};
+  const keys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
+  const changed = {};
+
+  keys.forEach((key) => {
+    if (key === 'changed_fields') return;
+    const before = oldObj[key];
+    const after = newObj[key];
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      changed[key] = { from: before, to: after };
+    }
+  });
+
+  return changed;
+}
+
 export default function InquiryDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const [inquiry, setInquiry] = useState(null);
+  const [historyLookups, setHistoryLookups] = useState({
+    campusById: {},
+    staffById: {},
+    classById: {},
+    sourceById: {},
+    tagById: {},
+  });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [followUpModal, setFollowUpModal] = useState(false);
@@ -27,8 +169,62 @@ export default function InquiryDetail() {
 
   async function loadInquiry() {
     try {
-      const res = await api.get(`/inquiries/${id}`);
-      setInquiry(res.data);
+      const res = await api.get(`/inquiries/${id}`, { params: { include_history: true } });
+      const inquiryData = res.data;
+      setInquiry(inquiryData);
+
+      const [campusesResult, classesResult, sourcesResult, tagsResult, staffResult] = await Promise.allSettled([
+        api.get('/campuses'),
+        api.get('/classes'),
+        api.get('/settings/inquiry-sources'),
+        api.get('/settings/inquiry-tags'),
+        isAdminOrAbove(user) ? api.get('/users/staff/available') : Promise.resolve({ data: [] }),
+      ]);
+
+      const campuses = campusesResult.status === 'fulfilled' && Array.isArray(campusesResult.value?.data)
+        ? campusesResult.value.data
+        : [];
+      const classes = classesResult.status === 'fulfilled' && Array.isArray(classesResult.value?.data)
+        ? classesResult.value.data
+        : [];
+      const sources = sourcesResult.status === 'fulfilled' && Array.isArray(sourcesResult.value?.data)
+        ? sourcesResult.value.data
+        : [];
+      const tags = tagsResult.status === 'fulfilled' && Array.isArray(tagsResult.value?.data)
+        ? tagsResult.value.data
+        : [];
+      const staff = staffResult.status === 'fulfilled' && Array.isArray(staffResult.value?.data)
+        ? staffResult.value.data
+        : [];
+
+      const campusById = {};
+      campuses.forEach((campus) => { campusById[String(campus.id)] = campus.name || `Campus #${campus.id}`; });
+      if (inquiryData?.campus?.id) campusById[String(inquiryData.campus.id)] = inquiryData.campus.name || `Campus #${inquiryData.campus.id}`;
+
+      const classById = {};
+      classes.forEach((item) => { classById[String(item.id)] = item.name || `Class #${item.id}`; });
+      if (inquiryData?.classApplying?.id) classById[String(inquiryData.classApplying.id)] = inquiryData.classApplying.name || `Class #${inquiryData.classApplying.id}`;
+
+      const sourceById = {};
+      sources.forEach((item) => { sourceById[String(item.id)] = item.name || `Source #${item.id}`; });
+      if (inquiryData?.source?.id) sourceById[String(inquiryData.source.id)] = inquiryData.source.name || `Source #${inquiryData.source.id}`;
+
+      const tagById = {};
+      tags.forEach((item) => { tagById[String(item.id)] = item.name || `Tag #${item.id}`; });
+      (inquiryData?.tags || []).forEach((item) => { tagById[String(item.id)] = item.name || `Tag #${item.id}`; });
+
+      const staffById = {};
+      staff.forEach((item) => { staffById[String(item.id)] = item.name || `Staff #${item.id}`; });
+      if (inquiryData?.assignedStaff?.id) staffById[String(inquiryData.assignedStaff.id)] = inquiryData.assignedStaff.name || `Staff #${inquiryData.assignedStaff.id}`;
+      if (inquiryData?.createdBy?.id) staffById[String(inquiryData.createdBy.id)] = inquiryData.createdBy.name || `Staff #${inquiryData.createdBy.id}`;
+      if (inquiryData?.updatedBy?.id) staffById[String(inquiryData.updatedBy.id)] = inquiryData.updatedBy.name || `Staff #${inquiryData.updatedBy.id}`;
+      (inquiryData?.change_history || []).forEach((event) => {
+        if (event?.user?.id) {
+          staffById[String(event.user.id)] = event.user.name || `Staff #${event.user.id}`;
+        }
+      });
+
+      setHistoryLookups({ campusById, staffById, classById, sourceById, tagById });
     } catch (err) {
       console.error(err);
     } finally {
@@ -117,9 +313,9 @@ export default function InquiryDetail() {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'overview' && <OverviewTab inquiry={inquiry} />}
-      {activeTab === 'followUps' && <FollowUpsTab followUps={inquiry.followUps || []} />}
-      {activeTab === 'activity' && <ActivityTab inquiryId={inquiry.id} />}
+      {activeTab === 'overview' && <OverviewTab inquiry={inquiry} historyLookups={historyLookups} />}
+      {activeTab === 'followUps' && <FollowUpsTab followUps={inquiry.followUps || []} historyLookups={historyLookups} />}
+      {activeTab === 'activity' && <ActivityTab inquiry={inquiry} historyLookups={historyLookups} />}
 
       {/* Follow-up Modal */}
       <FollowUpModal
@@ -140,8 +336,16 @@ export default function InquiryDetail() {
   );
 }
 
-function OverviewTab({ inquiry }) {
+function OverviewTab({ inquiry, historyLookups }) {
   const isCollegeInquiry = inquiry?.campus?.campus_type === 'college';
+  const createdAt = inquiry?.created_at || inquiry?.createdAt;
+  const updatedAt = inquiry?.updated_at || inquiry?.updatedAt || createdAt;
+  const createdByName = inquiry?.createdBy?.name || '-';
+  const updatedByName = inquiry?.updatedBy?.name || createdByName;
+  const history = Array.isArray(inquiry?.change_history) ? inquiry.change_history : [];
+  const overdueHistoryLabel = inquiry?.was_ever_overdue
+    ? `Yes${inquiry?.overdue_resolved_count ? ` (${inquiry.overdue_resolved_count} resolved)` : ''}`
+    : 'No';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -190,8 +394,46 @@ function OverviewTab({ inquiry }) {
           <InfoRow label="Campus" value={inquiry.campus?.name} />
           {isCollegeInquiry && inquiry.package_name && <InfoRow label="Package" value={inquiry.package_name} />}
           {isCollegeInquiry && (inquiry.package_amount !== null && inquiry.package_amount !== undefined) && <InfoRow label="Package Amount" value={inquiry.package_amount} />}
+          {isCollegeInquiry && inquiry.inquiry_form_taken !== null && inquiry.inquiry_form_taken !== undefined && (
+            <InfoRow label="Form Taken" value={inquiry.inquiry_form_taken ? 'Taken' : 'Not Taken'} />
+          )}
           {inquiry.session_preference && <InfoRow label="Session" value={inquiry.session_preference} />}
           <InfoRow label="Assigned To" value={inquiry.assignedStaff?.name || 'Unassigned'} />
+          <InfoRow label="Overdue History" value={overdueHistoryLabel} />
+          {inquiry.was_ever_overdue && inquiry.first_overdue_date && (
+            <InfoRow label="First Overdue" value={formatDate(inquiry.first_overdue_date)} />
+          )}
+          {inquiry.was_ever_overdue && inquiry.last_overdue_date && (
+            <InfoRow label="Last Overdue" value={formatDate(inquiry.last_overdue_date)} />
+          )}
+          {inquiry.was_ever_overdue && inquiry.overdue_last_resolved_at && (
+            <InfoRow label="Last Overdue Resolved" value={formatDateTime(inquiry.overdue_last_resolved_at)} />
+          )}
+          <InfoRow label="Sibling Inquiry" value={inquiry.is_sibling ? 'Yes' : 'No'} />
+          {inquiry.siblingOf?.id && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Linked Sibling</span>
+              <Link to={`/inquiries/${inquiry.siblingOf.id}`} className="text-sm font-medium text-primary-600 hover:text-primary-700">
+                #{inquiry.siblingOf.id} - {inquiry.siblingOf.student_name || 'Open'}
+              </Link>
+            </div>
+          )}
+          {Array.isArray(inquiry.linked_siblings) && inquiry.linked_siblings.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Related Siblings</p>
+              <div className="space-y-1">
+                {inquiry.linked_siblings.slice(0, 5).map((sibling) => (
+                  <Link
+                    key={sibling.id}
+                    to={`/inquiries/${sibling.id}`}
+                    className="block text-xs text-primary-600 hover:text-primary-700"
+                  >
+                    #{sibling.id} - {sibling.student_name || '-'} ({sibling.classApplying?.name || 'Class/Discipline'})
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500">Priority</span>
             <PriorityBadge priority={inquiry.priority} />
@@ -223,8 +465,62 @@ function OverviewTab({ inquiry }) {
           <p className="text-sm text-gray-400">No notes</p>
         )}
         <div className="mt-4 pt-4 border-t text-xs text-gray-400 space-y-1">
-          <p>Created by {inquiry.createdBy?.name} on {formatDateTime(inquiry.created_at)}</p>
-          {inquiry.updatedBy && <p>Last updated by {inquiry.updatedBy.name} on {formatDateTime(inquiry.updated_at)}</p>}
+          <p>Created by {createdByName} on {formatDateTime(createdAt)}</p>
+          <p>Last updated by {updatedByName} on {formatDateTime(updatedAt)}</p>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+            Update History
+          </p>
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-400">No update history available.</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto pr-1 space-y-2">
+              {history.map((event) => {
+                const previousState = event?.old_values && typeof event.old_values === 'object'
+                  ? event.old_values
+                  : {};
+                const nextState = event?.new_values && typeof event.new_values === 'object'
+                  ? event.new_values
+                  : {};
+                const explicitChanges = nextState?.changed_fields && typeof nextState.changed_fields === 'object'
+                  ? nextState.changed_fields
+                  : null;
+                const changedFields = explicitChanges && Object.keys(explicitChanges).length
+                  ? explicitChanges
+                  : deriveChangedFields(previousState, nextState);
+                const changedEntries = Object.entries(changedFields);
+
+                return (
+                  <div key={event.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-gray-700">
+                        {actionLabel(event.action)}
+                      </p>
+                      <p className="text-[11px] text-gray-500">
+                        {event.user?.name ? `By ${event.user.name} | ` : ''}
+                        {formatDateTime(event.created_at)}
+                      </p>
+                    </div>
+
+                    {changedEntries.length > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        {changedEntries.map(([key, values]) => (
+                          <p key={`${event.id}-${key}`} className="text-xs text-gray-600">
+                            <span className="font-medium">{formatHistoryKey(key)}:</span>{' '}
+                            {formatHistoryValue(key, values?.from, historyLookups)} {'->'} {formatHistoryValue(key, values?.to, historyLookups)}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-400">No field-level changes captured.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -243,16 +539,30 @@ function InfoRow({ icon: Icon, label, value }) {
   );
 }
 
-function FollowUpsTab({ followUps }) {
+function FollowUpsTab({ followUps, historyLookups }) {
   if (followUps.length === 0) {
     return <p className="text-center py-8 text-gray-400">No follow-ups recorded yet</p>;
   }
 
   return (
     <div className="space-y-4">
-      {followUps.sort((a, b) => new Date(b.follow_up_date) - new Date(a.follow_up_date)).map(fu => {
+      {[...followUps].sort((a, b) => new Date(b.follow_up_date) - new Date(a.follow_up_date)).map((fu) => {
         const typeLabel = FOLLOW_UP_TYPES.find(t => t.value === fu.type)?.label || fu.type;
         const interestLabel = INTEREST_LEVELS.find(i => i.value === fu.interest_level);
+        const createdAt = fu.created_at || fu.createdAt || fu.follow_up_date;
+        const updatedAt = fu.updated_at || fu.updatedAt || createdAt;
+        const followUpHistory = Array.isArray(fu.change_history) ? fu.change_history : [];
+        const followUpLookups = {
+          ...historyLookups,
+          staffById: {
+            ...(historyLookups?.staffById || {}),
+            ...(fu?.staff?.id ? { [String(fu.staff.id)]: fu.staff.name || `Staff #${fu.staff.id}` } : {}),
+          },
+          inquiryById: {
+            ...(fu?.inquiry_id ? { [String(fu.inquiry_id)]: `Inquiry #${fu.inquiry_id}` } : {}),
+          },
+        };
+
         return (
           <div key={fu.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
             <div className="flex items-start justify-between mb-2">
@@ -262,15 +572,73 @@ function FollowUpsTab({ followUps }) {
               </div>
               <span className="text-xs text-gray-400">{formatDateTime(fu.follow_up_date)}</span>
             </div>
-            {fu.notes && <p className="text-sm text-gray-700 mb-2">{fu.notes}</p>}
-            <div className="flex items-center gap-4 text-xs text-gray-500">
-              <span>By: {fu.staff?.name}</span>
+            {fu.notes ? (
+              <p className="text-sm text-gray-700 mb-2">{fu.notes}</p>
+            ) : (
+              <p className="text-sm text-gray-400 mb-2">No follow-up notes provided.</p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+              <span>By: {fu.staff?.name || '-'}</span>
               {interestLabel && <Badge color={interestLabel.color}>{interestLabel.label}</Badge>}
               {fu.next_action && <span>Next: {fu.next_action}</span>}
               {fu.next_action_date && (
                 <span className={isOverdue(fu.next_action_date) ? 'text-red-600 font-medium' : ''}>
                   Due: {formatDate(fu.next_action_date)}
                 </span>
+              )}
+              {fu.was_on_time !== null && fu.was_on_time !== undefined && (
+                <span className={fu.was_on_time ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
+                  {fu.was_on_time ? 'On Time' : 'Late'}
+                </span>
+              )}
+              <span>Created: {formatDateTime(createdAt)}</span>
+              <span>Updated: {formatDateTime(updatedAt)}</span>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">History</p>
+              {followUpHistory.length === 0 ? (
+                <p className="text-xs text-gray-400">No history available for this follow-up.</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+                  {followUpHistory.map((event) => {
+                    const previousState = event?.old_values && typeof event.old_values === 'object' ? event.old_values : {};
+                    const nextState = event?.new_values && typeof event.new_values === 'object' ? event.new_values : {};
+                    const explicitChanges = nextState?.changed_fields && typeof nextState.changed_fields === 'object'
+                      ? nextState.changed_fields
+                      : null;
+                    const changedFields = explicitChanges && Object.keys(explicitChanges).length
+                      ? explicitChanges
+                      : deriveChangedFields(previousState, nextState);
+                    const changedEntries = Object.entries(changedFields);
+
+                    return (
+                      <div key={event.id} className="rounded border border-gray-200 bg-white p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-gray-700">{actionLabel(event.action)}</p>
+                          <p className="text-[11px] text-gray-500">
+                            {event.user?.name ? `By ${event.user.name} | ` : ''}
+                            {formatDateTime(event.created_at)}
+                          </p>
+                        </div>
+
+                        {changedEntries.length > 0 ? (
+                          <div className="mt-2 space-y-1">
+                            {changedEntries.map(([key, values]) => (
+                              <p key={`${event.id}-${key}`} className="text-xs text-gray-600">
+                                <span className="font-medium">{formatHistoryKey(key)}:</span>{' '}
+                                {formatHistoryValue(key, values?.from, followUpLookups)} {'->'} {formatHistoryValue(key, values?.to, followUpLookups)}
+                              </p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-xs text-gray-400">No field-level changes captured.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -280,33 +648,75 @@ function FollowUpsTab({ followUps }) {
   );
 }
 
-function ActivityTab({ inquiryId }) {
-  const [activities, setActivities] = useState([]);
-  const [loading, setLoading] = useState(true);
+function ActivityTab({ inquiry, historyLookups }) {
+  const inquiryHistory = (Array.isArray(inquiry?.change_history) ? inquiry.change_history : []).map((event) => ({
+    ...event,
+    _scope: 'Inquiry',
+    _scopeId: inquiry?.id,
+  }));
 
-  useEffect(() => {
-    api.get('/dashboard/recent-activity')
-      .then(res => {
-        const filtered = res.data.filter(a => a.entity_type === 'inquiry' && a.entity_id === parseInt(inquiryId));
-        setActivities(filtered);
-      })
-      .finally(() => setLoading(false));
-  }, [inquiryId]);
+  const followUpHistory = (Array.isArray(inquiry?.followUps) ? inquiry.followUps : []).flatMap((followUp) => {
+    const events = Array.isArray(followUp?.change_history) ? followUp.change_history : [];
+    return events.map((event) => ({
+      ...event,
+      _scope: 'Follow-up',
+      _scopeId: followUp?.id,
+      _followUp: followUp,
+    }));
+  });
 
-  if (loading) return <LoadingSpinner />;
+  const activities = [...inquiryHistory, ...followUpHistory]
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 
   return (
     <div className="space-y-3">
-      {activities.map(act => (
-        <div key={act.id} className="flex items-start gap-3 bg-white rounded-lg border p-3">
-          <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
-          <div>
-            <span className="text-sm font-medium">{act.user?.name}</span>
-            <span className="text-sm text-gray-500"> {act.action.replace(/\./g, ' ')}</span>
-            <p className="text-xs text-gray-400">{relativeTime(act.created_at)}</p>
+      {activities.map((act) => {
+        const previousState = act?.old_values && typeof act.old_values === 'object' ? act.old_values : {};
+        const nextState = act?.new_values && typeof act.new_values === 'object' ? act.new_values : {};
+        const explicitChanges = nextState?.changed_fields && typeof nextState.changed_fields === 'object'
+          ? nextState.changed_fields
+          : null;
+        const changedFields = explicitChanges && Object.keys(explicitChanges).length
+          ? explicitChanges
+          : deriveChangedFields(previousState, nextState);
+        const changedEntries = Object.entries(changedFields);
+        const cardKey = `${act._scope}-${act.id}`;
+
+        const activityLookups = {
+          ...historyLookups,
+          staffById: {
+            ...(historyLookups?.staffById || {}),
+            ...(act?._followUp?.staff?.id ? { [String(act._followUp.staff.id)]: act._followUp.staff.name || `Staff #${act._followUp.staff.id}` } : {}),
+          },
+        };
+
+        return (
+          <div key={cardKey} className="bg-white rounded-lg border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-gray-800">
+                {act._scope} #{act._scopeId} - {actionLabel(act.action)}
+              </p>
+              <p className="text-xs text-gray-500">
+                {act.user?.name ? `By ${act.user.name} | ` : ''}
+                {formatDateTime(act.created_at)} ({relativeTime(act.created_at)})
+              </p>
+            </div>
+
+            {changedEntries.length > 0 ? (
+              <div className="mt-2 space-y-1">
+                {changedEntries.map(([key, values]) => (
+                  <p key={`${cardKey}-${key}`} className="text-xs text-gray-600">
+                    <span className="font-medium">{formatHistoryKey(key)}:</span>{' '}
+                    {formatHistoryValue(key, values?.from, activityLookups)} {'->'} {formatHistoryValue(key, values?.to, activityLookups)}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-400">No field-level details available.</p>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
       {activities.length === 0 && <p className="text-center py-8 text-gray-400">No activity logged</p>}
     </div>
   );

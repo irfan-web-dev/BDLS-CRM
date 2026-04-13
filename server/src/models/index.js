@@ -47,6 +47,14 @@ Inquiry.belongsTo(User, {
 });
 Inquiry.belongsTo(User, { foreignKey: "created_by", as: "createdBy" });
 Inquiry.belongsTo(User, { foreignKey: "updated_by", as: "updatedBy" });
+Inquiry.belongsTo(Inquiry, {
+  foreignKey: "sibling_of_inquiry_id",
+  as: "siblingOf",
+});
+Inquiry.hasMany(Inquiry, {
+  foreignKey: "sibling_of_inquiry_id",
+  as: "siblings",
+});
 
 Inquiry.hasMany(InquiryFollowUp, { foreignKey: "inquiry_id", as: "followUps" });
 InquiryFollowUp.belongsTo(Inquiry, { foreignKey: "inquiry_id", as: "inquiry" });
