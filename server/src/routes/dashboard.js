@@ -963,11 +963,22 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       role: { [Op.in]: STAFF_ROLE_SCOPE },
       ...req.campusScope,
     };
-    const staff = await User.findAll({
+    const campusType = req.query.campus_type;
+    const campusInclude = {
+      model: Campus,
+      as: 'campus',
+      attributes: ['id', 'name', 'campus_type'],
+      required: false,
+    };
+    const allStaff = await User.findAll({
       where: staffWhere,
       attributes: ['id', 'name', 'role'],
+      include: [campusInclude],
       order: [['name', 'ASC']],
     });
+    const staff = req.user.role === 'super_admin' && VALID_CAMPUS_TYPES.includes(campusType)
+      ? allStaff.filter(s => s.role === 'super_admin' || s.campus?.campus_type === campusType)
+      : allStaff;
 
     const staffControl = await Promise.all(staff.map(async (s) => {
       const assignedTotal = await Inquiry.count({
