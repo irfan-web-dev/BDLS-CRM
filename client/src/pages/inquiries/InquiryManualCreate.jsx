@@ -27,6 +27,10 @@ function hasAnyRowData(row) {
   return Object.values(row).some((value) => String(value || '').trim() !== '');
 }
 
+function normalizePhoneInput(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 11);
+}
+
 export default function InquiryManualCreate() {
   const { user } = useAuth();
   const [rows, setRows] = useState([createEmptyRow()]);
@@ -41,9 +45,9 @@ export default function InquiryManualCreate() {
 
   const [superAdminCampusType, setSuperAdminCampusType] = useState(user?.campus?.campus_type || 'school');
   const [selectedCampusId, setSelectedCampusId] = useState(user?.campus_id ? String(user.campus_id) : '');
+  const today = new Date().toISOString().split('T')[0];
 
   const superAdminCampusesByType = campuses.filter(c => c.campus_type === superAdminCampusType);
-  const selectedCampus = campuses.find(c => String(c.id) === String(selectedCampusId));
   const isCollegeFlow = isSuperAdmin(user)
     ? superAdminCampusType === 'college'
     : user?.campus?.campus_type === 'college';
@@ -124,7 +128,8 @@ export default function InquiryManualCreate() {
   }
 
   function updateRow(index, field, value) {
-    setRows(prev => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+    const normalizedValue = field === 'parent_phone' ? normalizePhoneInput(value) : value;
+    setRows(prev => prev.map((row, i) => (i === index ? { ...row, [field]: normalizedValue } : row)));
   }
 
   function addRow() {
@@ -153,6 +158,12 @@ export default function InquiryManualCreate() {
     if (!isCollegeFlow && (!row.parent_name || !row.parent_phone)) {
       return `Row ${rowNo}: Parent name and phone are required for school`;
     }
+    if (row.parent_phone && !/^\d{11}$/.test(String(row.parent_phone))) {
+      return `Row ${rowNo}: Phone must be exactly 11 digits`;
+    }
+    if (row.inquiry_date && row.inquiry_date > today) {
+      return `Row ${rowNo}: Inquiry date cannot be in the future`;
+    }
     return null;
   }
 
@@ -170,6 +181,7 @@ export default function InquiryManualCreate() {
       inquiry_date: row.inquiry_date || null,
       assigned_staff_id: row.assigned_staff_id ? Number.parseInt(row.assigned_staff_id, 10) : null,
       notes: row.notes?.trim() || null,
+      is_manual_entry: true,
       campus_id: campusId,
     };
   }
@@ -363,8 +375,12 @@ export default function InquiryManualCreate() {
                   <input
                     value={row.parent_phone}
                     onChange={(e) => updateRow(index, 'parent_phone', e.target.value)}
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={11}
+                    pattern="[0-9]{11}"
                     className={inputClass}
-                    placeholder="03XX-XXXXXXX"
+                    placeholder="03XXXXXXXXX"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -408,6 +424,7 @@ export default function InquiryManualCreate() {
                     type="date"
                     value={row.inquiry_date}
                     onChange={(e) => updateRow(index, 'inquiry_date', e.target.value)}
+                    max={today}
                     className={inputClass}
                   />
                 </td>
@@ -467,4 +484,3 @@ export default function InquiryManualCreate() {
     </div>
   );
 }
-

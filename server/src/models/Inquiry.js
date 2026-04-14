@@ -204,6 +204,11 @@ const Inquiry = sequelize.define('Inquiry', {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  is_manual_entry: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 
   // Meta
   notes: {

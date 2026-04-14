@@ -69,6 +69,7 @@ const INQUIRY_AUDIT_FIELDS = [
   'last_overdue_date',
   'overdue_resolved_count',
   'overdue_last_resolved_at',
+  'is_manual_entry',
   'is_sibling',
   'sibling_of_inquiry_id',
   'sibling_group_id',
@@ -101,6 +102,25 @@ function parseNullableBoolean(value) {
     if (['false', '0', 'no'].includes(normalized)) return false;
   }
   return null;
+}
+
+function normalizePhoneValue(value) {
+  if (value === null || value === undefined) return null;
+  const digits = String(value).replace(/\D/g, '');
+  return digits || null;
+}
+
+function isValidPhoneNumber(value) {
+  return /^\d{11}$/.test(String(value || ''));
+}
+
+function isFutureDateOnly(value) {
+  if (!value) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const inputDate = parsed.toISOString().slice(0, 10);
+  const today = todayDateOnly();
+  return inputDate > today;
 }
 
 function normalizeAuditValue(value) {
@@ -265,6 +285,7 @@ router.get('/', async (req, res) => {
       status, campus_id, class_id, source_id, assigned_staff_id,
       priority, date_from, date_to, search, tag_id,
       gender, area, previous_institute, followup_today, followup_filter,
+      is_manual_entry,
       page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC',
     } = req.query;
 
@@ -278,6 +299,17 @@ router.get('/', async (req, res) => {
     if (source_id) where.source_id = String(source_id).includes(',') ? { [Op.in]: source_id.split(',') } : source_id;
     if (assigned_staff_id) where.assigned_staff_id = String(assigned_staff_id).includes(',') ? { [Op.in]: assigned_staff_id.split(',') } : assigned_staff_id;
     if (priority) where.priority = priority.includes(',') ? { [Op.in]: priority.split(',') } : priority;
+    if (is_manual_entry !== undefined && is_manual_entry !== null && is_manual_entry !== '') {
+      const manualValues = String(is_manual_entry)
+        .split(',')
+        .map((item) => parseNullableBoolean(item))
+        .filter((item) => item !== null);
+      if (manualValues.length === 1) {
+        where.is_manual_entry = manualValues[0];
+      } else if (manualValues.length > 1) {
+        where.is_manual_entry = { [Op.in]: manualValues };
+      }
+    }
     if (gender) where.gender = gender.includes(',') ? { [Op.in]: gender.split(',') } : gender;
     if (area) where.area = area.includes(',') ? { [Op.in]: area.split(',') } : area;
     if (previous_institute) {
@@ -719,7 +751,7 @@ router.post('/', async (req, res) => {
       current_school, previous_institute, previous_marks_obtained, previous_total_marks, previous_major_subjects,
       special_needs, inquiry_date, source_id, referral_parent_name, package_name, package_amount, inquiry_form_taken,
       campus_id, session_preference, assigned_staff_id, priority, interest_level, next_follow_up_date, notes, tag_ids,
-      is_sibling, sibling_of_inquiry_id,
+      is_sibling, sibling_of_inquiry_id, is_manual_entry,
     } = req.body;
 
     const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : (campus_id || req.user.campus_id);
@@ -745,10 +777,42 @@ router.post('/', async (req, res) => {
     const normalizedParentName = isCollegeFlow
       ? (parent_name || student_name || 'Self')
       : parent_name;
-    const normalizedParentPhone = isCollegeFlow
-      ? (parent_phone || student_phone || 'N/A')
-      : parent_phone;
+    let normalizedParentPhone = normalizePhoneValue(
+      isCollegeFlow ? (parent_phone || student_phone || null) : parent_phone
+    );
+    const normalizedStudentPhone = normalizePhoneValue(student_phone);
+    const normalizedParentWhatsapp = normalizePhoneValue(parent_whatsapp);
     const normalizedRelationship = relationship || (isCollegeFlow ? 'other' : 'father');
+
+    if (isFutureDateOnly(inquiry_date)) {
+      return res.status(400).json({ error: 'Inquiry date cannot be in the future' });
+    }
+
+    if (!isCollegeFlow) {
+      if (!normalizedParentPhone) {
+        return res.status(400).json({ error: 'Parent phone is required for school inquiries' });
+      }
+      if (!isValidPhoneNumber(normalizedParentPhone)) {
+        return res.status(400).json({ error: 'Parent phone must be exactly 11 digits' });
+      }
+    } else {
+      if (!normalizedParentPhone && !normalizedStudentPhone) {
+        return res.status(400).json({ error: 'At least one phone number (parent or student) is required' });
+      }
+      if (normalizedParentPhone && !isValidPhoneNumber(normalizedParentPhone)) {
+        return res.status(400).json({ error: 'Parent phone must be exactly 11 digits' });
+      }
+      if (!normalizedParentPhone && normalizedStudentPhone) {
+        normalizedParentPhone = normalizedStudentPhone;
+      }
+    }
+
+    if (normalizedStudentPhone && !isValidPhoneNumber(normalizedStudentPhone)) {
+      return res.status(400).json({ error: 'Student phone must be exactly 11 digits' });
+    }
+    if (normalizedParentWhatsapp && !isValidPhoneNumber(normalizedParentWhatsapp)) {
+      return res.status(400).json({ error: 'WhatsApp number must be exactly 11 digits' });
+    }
 
     let normalizedAssignedStaffId = null;
     if (assigned_staff_id) {
@@ -772,9 +836,9 @@ router.post('/', async (req, res) => {
       parent_name: normalizedParentName,
       relationship: normalizedRelationship,
       parent_phone: normalizedParentPhone,
-      parent_whatsapp,
+      parent_whatsapp: normalizedParentWhatsapp,
       parent_email,
-      city, area, student_name, date_of_birth, gender, student_phone, class_applying_id,
+      city, area, student_name, date_of_birth, gender, student_phone: normalizedStudentPhone, class_applying_id,
       current_school, previous_institute, previous_marks_obtained, previous_total_marks, previous_major_subjects,
       special_needs,
       inquiry_date: inquiry_date || new Date().toISOString().split('T')[0],
@@ -789,6 +853,7 @@ router.post('/', async (req, res) => {
       is_sibling: siblingLink.is_sibling,
       sibling_of_inquiry_id: siblingLink.sibling_of_inquiry_id,
       sibling_group_id: siblingLink.sibling_group_id,
+      is_manual_entry: parseNullableBoolean(is_manual_entry) === true,
       notes, status: 'new',
       created_by: req.user.id,
     };
@@ -862,6 +927,12 @@ router.put('/:id', async (req, res) => {
     const targetCampusId = updateData.campus_id !== undefined && updateData.campus_id !== null
       ? updateData.campus_id
       : inquiry.campus_id;
+    const campusRecord = await Campus.findOne({
+      where: { id: targetCampusId, deleted_at: null, is_active: true },
+      attributes: ['id', 'campus_type'],
+      raw: true,
+    });
+    const isCollegeFlow = campusRecord?.campus_type === 'college';
     if (updateData.assigned_staff_id !== undefined && updateData.assigned_staff_id !== null) {
       const validation = await validateAssignedStaff(req, updateData.assigned_staff_id, targetCampusId);
       if (validation?.error) {
@@ -897,8 +968,57 @@ router.put('/:id', async (req, res) => {
     if (updateData.package_amount !== undefined && updateData.package_amount !== null) {
       updateData.package_amount = Number.parseInt(updateData.package_amount, 10);
     }
+    if (updateData.inquiry_date && isFutureDateOnly(updateData.inquiry_date)) {
+      return res.status(400).json({ error: 'Inquiry date cannot be in the future' });
+    }
+    const hasParentPhoneUpdate = Object.prototype.hasOwnProperty.call(updateData, 'parent_phone');
+    const hasStudentPhoneUpdate = Object.prototype.hasOwnProperty.call(updateData, 'student_phone');
+    const hasWhatsappUpdate = Object.prototype.hasOwnProperty.call(updateData, 'parent_whatsapp');
+    if (hasParentPhoneUpdate) {
+      updateData.parent_phone = normalizePhoneValue(updateData.parent_phone);
+    }
+    if (hasStudentPhoneUpdate) {
+      updateData.student_phone = normalizePhoneValue(updateData.student_phone);
+    }
+    if (hasWhatsappUpdate) {
+      updateData.parent_whatsapp = normalizePhoneValue(updateData.parent_whatsapp);
+    }
+    if (hasParentPhoneUpdate || hasStudentPhoneUpdate || hasWhatsappUpdate) {
+      const effectiveParentPhone = hasParentPhoneUpdate ? updateData.parent_phone : inquiry.parent_phone;
+      const effectiveStudentPhone = hasStudentPhoneUpdate ? updateData.student_phone : inquiry.student_phone;
+      const effectiveWhatsapp = hasWhatsappUpdate ? updateData.parent_whatsapp : inquiry.parent_whatsapp;
+
+      if (!isCollegeFlow) {
+        if (!effectiveParentPhone) {
+          return res.status(400).json({ error: 'Parent phone is required for school inquiries' });
+        }
+        if (!isValidPhoneNumber(effectiveParentPhone)) {
+          return res.status(400).json({ error: 'Parent phone must be exactly 11 digits' });
+        }
+      } else {
+        if (!effectiveParentPhone && !effectiveStudentPhone) {
+          return res.status(400).json({ error: 'At least one phone number (parent or student) is required' });
+        }
+        if (effectiveParentPhone && !isValidPhoneNumber(effectiveParentPhone)) {
+          return res.status(400).json({ error: 'Parent phone must be exactly 11 digits' });
+        }
+        if (!effectiveParentPhone && effectiveStudentPhone && hasParentPhoneUpdate) {
+          updateData.parent_phone = effectiveStudentPhone;
+        }
+      }
+
+      if (effectiveStudentPhone && !isValidPhoneNumber(effectiveStudentPhone)) {
+        return res.status(400).json({ error: 'Student phone must be exactly 11 digits' });
+      }
+      if (effectiveWhatsapp && !isValidPhoneNumber(effectiveWhatsapp)) {
+        return res.status(400).json({ error: 'WhatsApp number must be exactly 11 digits' });
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(updateData, 'inquiry_form_taken')) {
       updateData.inquiry_form_taken = parseNullableBoolean(updateData.inquiry_form_taken);
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'is_manual_entry')) {
+      updateData.is_manual_entry = parseNullableBoolean(updateData.is_manual_entry) === true;
     }
 
     updateData.updated_by = req.user.id;

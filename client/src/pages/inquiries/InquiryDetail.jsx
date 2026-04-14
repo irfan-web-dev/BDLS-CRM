@@ -54,6 +54,7 @@ const HISTORY_FIELD_LABELS = {
   last_overdue_date: 'Last Overdue Date',
   overdue_resolved_count: 'Overdue Resolved Count',
   overdue_last_resolved_at: 'Last Overdue Resolved At',
+  is_manual_entry: 'Manual Entry',
   is_sibling: 'Sibling Inquiry',
   sibling_of_inquiry_id: 'Linked Sibling Inquiry',
   sibling_group_id: 'Sibling Group',
@@ -399,6 +400,7 @@ function OverviewTab({ inquiry, historyLookups }) {
           )}
           {inquiry.session_preference && <InfoRow label="Session" value={inquiry.session_preference} />}
           <InfoRow label="Assigned To" value={inquiry.assignedStaff?.name || 'Unassigned'} />
+          <InfoRow label="Entry Type" value={inquiry.is_manual_entry ? 'Manual Entry' : 'Regular Entry'} />
           <InfoRow label="Overdue History" value={overdueHistoryLabel} />
           {inquiry.was_ever_overdue && inquiry.first_overdue_date && (
             <InfoRow label="First Overdue" value={formatDate(inquiry.first_overdue_date)} />

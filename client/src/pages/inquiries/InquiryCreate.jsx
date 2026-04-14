@@ -36,9 +36,17 @@ const SIBLING_SHARED_FIELDS = [
   'assigned_staff_id',
   'priority',
 ];
-const SIBLING_SHARED_FIELD_SET = new Set(SIBLING_SHARED_FIELDS);
 const INQUIRY_DRAFT_STORAGE_PREFIX = 'bdls_inquiry_create_draft_v1';
 const INQUIRY_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PHONE_FIELDS = new Set(['parent_phone', 'parent_whatsapp', 'student_phone']);
+
+function normalizePhoneInput(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 11);
+}
+
+function isValidPhoneInput(value) {
+  return /^\d{11}$/.test(String(value || ''));
+}
 
 function getInquiryDraftStorageKey(userId, manualMode = false) {
   return `${INQUIRY_DRAFT_STORAGE_PREFIX}:${manualMode ? 'manual' : 'default'}:${String(userId || 'guest')}`;
@@ -49,6 +57,7 @@ export default function InquiryCreate({ manualMode = false }) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const [campuses, setCampuses] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -73,42 +82,31 @@ export default function InquiryCreate({ manualMode = false }) {
   const filteredAreas = areaOptions.filter(a => a.toLowerCase().includes(areaSearch.toLowerCase()));
 
   function handleAreaSelect(area) {
-    setForm(prev => {
-      const next = { ...prev, area };
-      syncSecondFormSharedFrom(next);
-      return next;
-    });
+    setSuccess('');
+    setForm(prev => ({ ...prev, area }));
     setAreaSearch(area);
     setShowAreaDropdown(false);
   }
 
   function handleAreaInput(value) {
+    setSuccess('');
     setAreaSearch(value);
-    setForm(prev => {
-      const next = { ...prev, area: value };
-      syncSecondFormSharedFrom(next);
-      return next;
-    });
+    setForm(prev => ({ ...prev, area: value }));
     setShowAreaDropdown(true);
   }
 
   function handleAddArea() {
+    setSuccess('');
     if (areaSearch.trim() && !areaOptions.some(a => a.toLowerCase() === areaSearch.trim().toLowerCase())) {
       setAreaOptions(prev => [...prev, areaSearch.trim()].sort());
     }
-    setForm(prev => {
-      const next = { ...prev, area: areaSearch.trim() };
-      syncSecondFormSharedFrom(next);
-      return next;
-    });
+    setForm(prev => ({ ...prev, area: areaSearch.trim() }));
     setShowAreaDropdown(false);
   }
 
   const today = new Date().toISOString().split('T')[0];
 
   const [form, setForm] = useState(() => createInquiryFormState(today, user?.campus_id || '', manualMode));
-  const [secondFormEnabled, setSecondFormEnabled] = useState(false);
-  const [secondForm, setSecondForm] = useState(() => createInquiryFormState(today, user?.campus_id || '', manualMode));
   const [siblingEnabled, setSiblingEnabled] = useState(false);
   const [selectedSibling, setSelectedSibling] = useState(null);
   const [siblingQuery, setSiblingQuery] = useState('');
@@ -141,10 +139,6 @@ export default function InquiryCreate({ manualMode = false }) {
       if (parsed?.form && typeof parsed.form === 'object') {
         setForm(prev => ({ ...prev, ...parsed.form }));
       }
-      if (parsed?.secondForm && typeof parsed.secondForm === 'object') {
-        setSecondForm(prev => ({ ...prev, ...parsed.secondForm }));
-      }
-      setSecondFormEnabled(Boolean(parsed?.secondFormEnabled));
       setSiblingEnabled(Boolean(parsed?.siblingEnabled));
       setSelectedSibling(parsed?.selectedSibling || null);
       setSiblingQuery(typeof parsed?.siblingQuery === 'string' ? parsed.siblingQuery : '');
@@ -175,7 +169,6 @@ export default function InquiryCreate({ manualMode = false }) {
 
   useEffect(() => {
     if (!manualMode) return;
-    setSecondFormEnabled(false);
     setSiblingEnabled(false);
     setSelectedSibling(null);
     setSiblingQuery('');
@@ -191,8 +184,6 @@ export default function InquiryCreate({ manualMode = false }) {
         JSON.stringify({
           savedAt: Date.now(),
           form,
-          secondFormEnabled,
-          secondForm,
           siblingEnabled,
           selectedSibling,
           siblingQuery,
@@ -206,8 +197,6 @@ export default function InquiryCreate({ manualMode = false }) {
   }, [
     user?.id,
     form,
-    secondFormEnabled,
-    secondForm,
     siblingEnabled,
     selectedSibling,
     siblingQuery,
@@ -229,12 +218,6 @@ export default function InquiryCreate({ manualMode = false }) {
       setForm(prev => ({ ...prev, class_applying_id: '' }));
     }
   }, [classes]);
-
-  useEffect(() => {
-    if (secondForm.class_applying_id && !classes.some(c => String(c.id) === String(secondForm.class_applying_id))) {
-      setSecondForm(prev => ({ ...prev, class_applying_id: '' }));
-    }
-  }, [classes, secondForm.class_applying_id]);
 
   useEffect(() => {
     if (!isSuperAdmin(user)) return;
@@ -262,14 +245,6 @@ export default function InquiryCreate({ manualMode = false }) {
       setForm(prev => ({ ...prev, campus_id: autoCampus }));
     }
   }, [campuses, form.campus_id, superAdminCampusType, user]);
-
-  useEffect(() => {
-    const normalizedCampusId = isSuperAdmin(user) ? form.campus_id : (user?.campus_id || '');
-    setSecondForm(prev => ({
-      ...prev,
-      campus_id: normalizedCampusId || '',
-    }));
-  }, [form.campus_id, user?.campus_id, user?.role]);
 
   useEffect(() => {
     if (!siblingEnabled) {
@@ -306,53 +281,6 @@ export default function InquiryCreate({ manualMode = false }) {
 
     return () => clearTimeout(timer);
   }, [siblingQuery, siblingEnabled, form.campus_id, user?.campus_id, user?.role]);
-
-  useEffect(() => {
-    if (!siblingEnabled || !secondFormEnabled) return;
-
-    const sharedPatch = {};
-    SIBLING_SHARED_FIELDS.forEach((key) => {
-      sharedPatch[key] = form[key] ?? '';
-    });
-
-    setSecondForm((prev) => ({
-      ...prev,
-      ...sharedPatch,
-      campus_id: isSuperAdmin(user) ? (form.campus_id || '') : (user?.campus_id || prev.campus_id || ''),
-    }));
-  }, [
-    siblingEnabled,
-    secondFormEnabled,
-    form.parent_name,
-    form.relationship,
-    form.parent_phone,
-    form.parent_whatsapp,
-    form.parent_email,
-    form.city,
-    form.area,
-    form.source_id,
-    form.session_preference,
-    form.assigned_staff_id,
-    form.priority,
-    form.campus_id,
-    user?.campus_id,
-    user?.role,
-  ]);
-
-  function syncSecondFormSharedFrom(nextForm) {
-    if (!siblingEnabled || !secondFormEnabled) return;
-
-    const sharedPatch = {};
-    SIBLING_SHARED_FIELDS.forEach((key) => {
-      sharedPatch[key] = nextForm[key] ?? '';
-    });
-
-    setSecondForm((prev) => ({
-      ...prev,
-      ...sharedPatch,
-      campus_id: isSuperAdmin(user) ? (nextForm.campus_id || '') : (user?.campus_id || prev.campus_id || ''),
-    }));
-  }
 
   async function loadBaseOptions() {
     try {
@@ -418,8 +346,10 @@ export default function InquiryCreate({ manualMode = false }) {
 
   function handleChange(e) {
     const { name, value } = e.target;
+    const normalizedValue = PHONE_FIELDS.has(name) ? normalizePhoneInput(value) : value;
+    setSuccess('');
     if (isSuperAdmin(user) && name === 'campus_id') {
-      const campus = campuses.find(c => String(c.id) === String(value));
+      const campus = campuses.find(c => String(c.id) === String(normalizedValue));
       if (campus?.campus_type && campus.campus_type !== superAdminCampusType) {
         setSuperAdminCampusType(campus.campus_type);
       }
@@ -427,42 +357,7 @@ export default function InquiryCreate({ manualMode = false }) {
       setSiblingQuery('');
       setSiblingResults([]);
     }
-    setForm(prev => {
-      const next = { ...prev, [name]: value };
-      if (SIBLING_SHARED_FIELD_SET.has(name)) {
-        syncSecondFormSharedFrom(next);
-      }
-      return next;
-    });
-  }
-
-  function handleSecondChange(e) {
-    const { name, value } = e.target;
-    setSecondForm(prev => ({ ...prev, [name]: value }));
-  }
-
-  function toggleSecondForm() {
-    if (secondFormEnabled) {
-      setSecondFormEnabled(false);
-      setSecondForm(createInquiryFormState(today, isSuperAdmin(user) ? form.campus_id : (user?.campus_id || ''), manualMode));
-      return;
-    }
-
-    setSecondFormEnabled(true);
-    setSecondForm(prev => ({
-      ...createInquiryFormState(today, isSuperAdmin(user) ? form.campus_id : (user?.campus_id || ''), manualMode),
-      parent_name: form.parent_name || prev.parent_name,
-      relationship: form.relationship || prev.relationship,
-      parent_phone: form.parent_phone || prev.parent_phone,
-      parent_whatsapp: form.parent_whatsapp || prev.parent_whatsapp,
-      parent_email: form.parent_email || prev.parent_email,
-      city: form.city || prev.city,
-      area: form.area || prev.area,
-      source_id: form.source_id || prev.source_id,
-      session_preference: form.session_preference || prev.session_preference,
-      assigned_staff_id: form.assigned_staff_id || prev.assigned_staff_id,
-      priority: form.priority || prev.priority,
-    }));
+    setForm(prev => ({ ...prev, [name]: normalizedValue }));
   }
 
   function applySiblingSharedFields(siblingData) {
@@ -470,7 +365,8 @@ export default function InquiryCreate({ manualMode = false }) {
     const patch = {};
     SIBLING_SHARED_FIELDS.forEach((key) => {
       if (siblingData[key] !== null && siblingData[key] !== undefined && siblingData[key] !== '') {
-        patch[key] = String(siblingData[key]);
+        const rawValue = String(siblingData[key]);
+        patch[key] = PHONE_FIELDS.has(key) ? normalizePhoneInput(rawValue) : rawValue;
       }
     });
 
@@ -483,16 +379,11 @@ export default function InquiryCreate({ manualMode = false }) {
       ...patch,
       campus_id: isSuperAdmin(user) ? (String(siblingData.campus_id || prev.campus_id || '')) : prev.campus_id,
     }));
-
-    setSecondForm(prev => ({
-      ...prev,
-      ...patch,
-      campus_id: isSuperAdmin(user) ? (String(siblingData.campus_id || prev.campus_id || '')) : prev.campus_id,
-    }));
   }
 
   async function handleSiblingSelect(candidate) {
     try {
+      setSuccess('');
       const res = await api.get(`/inquiries/${candidate.id}`, { params: { include_history: false } });
       const siblingData = res.data || candidate;
       setSelectedSibling({
@@ -526,14 +417,6 @@ export default function InquiryCreate({ manualMode = false }) {
       assigned_staff_id: '',
       inquiry_form_taken: '',
     }));
-    setSecondForm(prev => ({
-      ...prev,
-      campus_id: '',
-      class_applying_id: '',
-      source_id: '',
-      assigned_staff_id: '',
-      inquiry_form_taken: '',
-    }));
     setClasses([]);
     setStaff([]);
     setSources([]);
@@ -553,11 +436,13 @@ export default function InquiryCreate({ manualMode = false }) {
 
     if (isCollegeFlow) {
       const studentName = String(data.student_name || '').trim();
-      const studentPhone = String(data.student_phone || '').trim();
+      const studentPhone = normalizePhoneInput(data.student_phone);
+      const parentPhone = normalizePhoneInput(data.parent_phone);
+      const parentWhatsapp = normalizePhoneInput(data.parent_whatsapp);
       data.parent_name = String(data.parent_name || '').trim() || studentName || 'Self';
-      data.parent_phone = String(data.parent_phone || '').trim() || studentPhone || 'N/A';
+      data.parent_phone = parentPhone || studentPhone || null;
       data.relationship = data.relationship || 'other';
-      data.parent_whatsapp = String(data.parent_whatsapp || '').trim() || studentPhone || null;
+      data.parent_whatsapp = isValidPhoneInput(parentWhatsapp) ? parentWhatsapp : null;
     }
 
     Object.keys(data).forEach((k) => {
@@ -588,10 +473,28 @@ export default function InquiryCreate({ manualMode = false }) {
     return data;
   }
 
+  function buildNextSiblingFormState(sharedSeed = null) {
+    const normalizedCampusId = isSuperAdmin(user) ? (form.campus_id || '') : (user?.campus_id || '');
+    const next = createInquiryFormState(today, normalizedCampusId, manualMode);
+    SIBLING_SHARED_FIELDS.forEach((key) => {
+      const seedValue = sharedSeed?.[key];
+      let value = seedValue !== null && seedValue !== undefined && seedValue !== '' ? seedValue : (form[key] ?? '');
+      if (['source_id', 'assigned_staff_id'].includes(key) && value !== null && value !== undefined && value !== '') {
+        value = String(value);
+      }
+      next[key] = value;
+    });
+    next.campus_id = normalizedCampusId;
+    next.inquiry_date = form.inquiry_date || today;
+    return next;
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
+    const submitAction = e.nativeEvent?.submitter?.value || 'view_detail';
 
     try {
       if (isSuperAdminWithoutCampus) {
@@ -599,34 +502,61 @@ export default function InquiryCreate({ manualMode = false }) {
       }
 
       if (!form.student_name || !form.class_applying_id) {
-        throw new Error('Please fill student name and class/discipline in Form 1');
+        throw new Error('Please fill student name and class/discipline');
       }
 
-      if (!manualMode && secondFormEnabled && (!secondForm.student_name || !secondForm.class_applying_id)) {
-        throw new Error('Please fill student name and class/discipline in Form 2');
+      if (form.inquiry_date && form.inquiry_date > today) {
+        throw new Error('Inquiry date cannot be in the future');
       }
 
-      if (!manualMode && siblingEnabled && !selectedSibling && !secondFormEnabled) {
-        throw new Error('Sibling option ON hai. Existing sibling select karein ya Add Second Form se sibling entry add karein.');
+      if (!isCollegeFlow) {
+        if (!isValidPhoneInput(form.parent_phone)) {
+          throw new Error('Parent phone must be exactly 11 digits');
+        }
+      } else if (form.parent_phone && !isValidPhoneInput(form.parent_phone)) {
+        throw new Error('Parent phone must be exactly 11 digits');
+      }
+      if (form.student_phone && !isValidPhoneInput(form.student_phone)) {
+        throw new Error('Student phone must be exactly 11 digits');
+      }
+      if (!isCollegeFlow && form.parent_whatsapp && !isValidPhoneInput(form.parent_whatsapp)) {
+        throw new Error('WhatsApp number must be exactly 11 digits');
+      }
+
+      if (!manualMode && siblingEnabled && !selectedSibling && submitAction !== 'next_sibling') {
+        throw new Error('Sibling option ON hai. Existing sibling record select karein.');
       }
 
       const selectedSiblingId = selectedSibling?.id || null;
+      const shouldLinkAsSibling = !manualMode && siblingEnabled && Boolean(selectedSiblingId);
       const primaryPayload = buildPayload(form, {
-        linkAsSibling: manualMode ? false : siblingEnabled,
+        linkAsSibling: shouldLinkAsSibling,
         siblingReferenceId: selectedSiblingId,
         includeTags: true,
       });
       const primaryRes = await api.post('/inquiries', primaryPayload);
 
-      let redirectId = primaryRes?.data?.id;
-      if (!manualMode && secondFormEnabled) {
-        const secondaryPayload = buildPayload(secondForm, {
-          linkAsSibling: manualMode ? false : siblingEnabled,
-          siblingReferenceId: selectedSiblingId || primaryRes?.data?.id || null,
-          includeTags: false,
-        });
-        const secondaryRes = await api.post('/inquiries', secondaryPayload);
-        redirectId = secondaryRes?.data?.id || redirectId;
+      const createdInquiry = primaryRes?.data || {};
+      const redirectId = createdInquiry?.id;
+
+      if (!manualMode && submitAction === 'next_sibling') {
+        const linkedSibling = selectedSibling || {
+          id: createdInquiry.id,
+          student_name: createdInquiry.student_name || form.student_name,
+          parent_name: createdInquiry.parent_name || form.parent_name,
+          parent_phone: createdInquiry.parent_phone || form.parent_phone,
+          classApplying: createdInquiry.classApplying || null,
+        };
+
+        setSiblingEnabled(true);
+        setSelectedSibling(linkedSibling);
+        setSiblingQuery(linkedSibling.student_name || '');
+        setSiblingResults([]);
+        const nextForm = buildNextSiblingFormState(createdInquiry);
+        setForm(nextForm);
+        setAreaSearch(nextForm.area || '');
+        setSuccess('Inquiry saved. Non-unique fields auto-filled. Next sibling ke unique fields fill karein aur دوبارہ save karein.');
+        return;
       }
 
       if (user?.id) {
@@ -689,22 +619,14 @@ export default function InquiryCreate({ manualMode = false }) {
 
     return (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h3 className="text-base font-semibold text-gray-900">Sibling Option</h3>
-          <button
-            type="button"
-            onClick={toggleSecondForm}
-            className="text-xs font-medium rounded-lg border border-gray-300 px-3 py-1.5 text-gray-700 hover:bg-gray-50"
-          >
-            {secondFormEnabled ? 'Remove Second Form' : 'Add Second Form'}
-          </button>
-        </div>
+        <h3 className="text-base font-semibold text-gray-900 mb-3">Sibling Option</h3>
 
         <label className="inline-flex items-center gap-2 text-sm text-gray-700">
           <input
             type="checkbox"
             checked={siblingEnabled}
             onChange={(e) => {
+              setSuccess('');
               setSiblingEnabled(e.target.checked);
               if (!e.target.checked) {
                 setSelectedSibling(null);
@@ -776,7 +698,7 @@ export default function InquiryCreate({ manualMode = false }) {
 
             {!selectedSibling && siblingQuery.trim().length >= 2 && siblingResults.length === 0 && !siblingSearching && (
               <p className="text-xs text-gray-500">
-                No existing sibling found. Continue with manual entry or add second form.
+                No existing sibling found. Pehle regular inquiry save karein, phir "Save & Add Next Sibling" se family add kar sakte hain.
               </p>
             )}
 
@@ -799,148 +721,6 @@ export default function InquiryCreate({ manualMode = false }) {
             )}
           </div>
         )}
-      </div>
-    );
-  }
-
-  function renderSecondFormSection() {
-    if (!secondFormEnabled) return null;
-    const lockSharedFields = siblingEnabled;
-
-    return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-        <h3 className="text-base font-semibold text-gray-900 mb-1">Second Inquiry Form</h3>
-        <p className="text-xs text-gray-500 mb-4">
-          {siblingEnabled
-            ? 'Shared fields can be auto-filled from selected sibling. Enter unique student details below.'
-            : 'Fill this second inquiry manually.'}
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelClass}>Student Full Name *</label>
-            <input name="student_name" value={secondForm.student_name} onChange={handleSecondChange} required={secondFormEnabled} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>{isCollegeFlow ? 'Discipline *' : 'Class Applying For *'}</label>
-            <select name="class_applying_id" value={secondForm.class_applying_id} onChange={handleSecondChange} required={secondFormEnabled} className={inputClass}>
-              <option value="">{isSuperAdmin(user) && !secondForm.campus_id ? 'Select campus first' : (isCollegeFlow ? 'Select discipline' : 'Select class')}</option>
-              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Date of Birth</label>
-            <input name="date_of_birth" type="date" value={secondForm.date_of_birth} onChange={handleSecondChange} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Gender</label>
-            <select name="gender" value={secondForm.gender} onChange={handleSecondChange} className={inputClass}>
-              <option value="">Select</option>
-              {GENDERS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Student Phone</label>
-            <input name="student_phone" value={secondForm.student_phone} onChange={handleSecondChange} className={inputClass} placeholder="03XX-XXXXXXX" />
-          </div>
-          <div>
-            <label className={labelClass}>Parent Full Name *</label>
-            <input name="parent_name" value={secondForm.parent_name} onChange={handleSecondChange} required={secondFormEnabled} className={inputClass} disabled={lockSharedFields} />
-          </div>
-          <div>
-            <label className={labelClass}>Relationship *</label>
-            <select name="relationship" value={secondForm.relationship} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields}>
-              <option value="">Select</option>
-              {RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Parent Phone *</label>
-            <input name="parent_phone" value={secondForm.parent_phone} onChange={handleSecondChange} required={secondFormEnabled} className={inputClass} placeholder="03XX-XXXXXXX" disabled={lockSharedFields} />
-          </div>
-          <div>
-            <label className={labelClass}>WhatsApp Number</label>
-            <input name="parent_whatsapp" value={secondForm.parent_whatsapp} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields} />
-          </div>
-          {!isCollegeFlow && (
-            <>
-              <div>
-                <label className={labelClass}>Email</label>
-                <input name="parent_email" value={secondForm.parent_email} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields} />
-              </div>
-              <div>
-                <label className={labelClass}>Current School</label>
-                <input name="current_school" value={secondForm.current_school} onChange={handleSecondChange} className={inputClass} />
-              </div>
-            </>
-          )}
-          {isCollegeFlow && (
-            <>
-              <div>
-                <label className={labelClass}>Previous Institute</label>
-                <input name="previous_institute" value={secondForm.previous_institute} onChange={handleSecondChange} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Major Subjects</label>
-                <input name="previous_major_subjects" value={secondForm.previous_major_subjects} onChange={handleSecondChange} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Marks Obtained</label>
-                <input type="number" min="0" name="previous_marks_obtained" value={secondForm.previous_marks_obtained} onChange={handleSecondChange} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Total Marks</label>
-                <input type="number" min="0" name="previous_total_marks" value={secondForm.previous_total_marks} onChange={handleSecondChange} className={inputClass} />
-              </div>
-            </>
-          )}
-          <div>
-            <label className={labelClass}>City</label>
-            <input name="city" value={secondForm.city} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields} />
-          </div>
-          <div>
-            <label className={labelClass}>Area</label>
-            <input name="area" value={secondForm.area} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields} />
-          </div>
-          <div>
-            <label className={labelClass}>Inquiry Date *</label>
-            <input name="inquiry_date" type="date" value={secondForm.inquiry_date} onChange={handleSecondChange} max={today} required={secondFormEnabled} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>How They Heard About Us</label>
-            <select name="source_id" value={secondForm.source_id} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields}>
-              <option value="">Select source</option>
-              {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Session Preference</label>
-            <select name="session_preference" value={secondForm.session_preference} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields}>
-              <option value="">Select</option>
-              {SESSION_PREFERENCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </div>
-          {isAdminOrAbove(user) && (
-            <div>
-              <label className={labelClass}>Assign to Staff</label>
-              <select name="assigned_staff_id" value={secondForm.assigned_staff_id} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields}>
-                <option value="">Select staff</option>
-                {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-          )}
-          <div>
-            <label className={labelClass}>Priority</label>
-            <select name="priority" value={secondForm.priority} onChange={handleSecondChange} className={inputClass} disabled={lockSharedFields}>
-              <option value="">Select</option>
-              {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </select>
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelClass}>Notes</label>
-            <textarea name="notes" value={secondForm.notes} onChange={handleSecondChange} rows={2} className={inputClass} />
-          </div>
-        </div>
       </div>
     );
   }
@@ -1034,11 +814,32 @@ export default function InquiryCreate({ manualMode = false }) {
               </div>
               <div>
                 <label className={labelClass}>Student Phone</label>
-                <input name="student_phone" value={form.student_phone} onChange={handleChange} className={inputClass} placeholder="03XX-XXXXXXX" />
+                <input
+                  name="student_phone"
+                  value={form.student_phone}
+                  onChange={handleChange}
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{11}"
+                  className={inputClass}
+                  placeholder="03XX-XXXXXXX"
+                />
               </div>
               <div>
                 <label className={labelClass}>Parent / Guardian Phone</label>
-                <input name="parent_phone" value={form.parent_phone} onChange={handleChange} className={inputClass} placeholder="03XX-XXXXXXX" disabled={primarySharedLocked} />
+                <input
+                  name="parent_phone"
+                  value={form.parent_phone}
+                  onChange={handleChange}
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{11}"
+                  className={inputClass}
+                  placeholder="03XX-XXXXXXX"
+                  disabled={primarySharedLocked}
+                />
               </div>
               <div>
                 <label className={labelClass}>Priority</label>
@@ -1105,11 +906,34 @@ export default function InquiryCreate({ manualMode = false }) {
           </div>
           <div>
             <label className={labelClass}>Parent Phone *</label>
-            <input name="parent_phone" value={form.parent_phone} onChange={handleChange} required className={inputClass} placeholder="03XX-XXXXXXX" disabled={primarySharedLocked} />
+            <input
+              name="parent_phone"
+              value={form.parent_phone}
+              onChange={handleChange}
+              type="tel"
+              inputMode="numeric"
+              maxLength={11}
+              pattern="[0-9]{11}"
+              required
+              className={inputClass}
+              placeholder="03XX-XXXXXXX"
+              disabled={primarySharedLocked}
+            />
           </div>
           <div>
             <label className={labelClass}>WhatsApp Number</label>
-            <input name="parent_whatsapp" value={form.parent_whatsapp} onChange={handleChange} className={inputClass} placeholder="If different from phone" disabled={primarySharedLocked} />
+            <input
+              name="parent_whatsapp"
+              value={form.parent_whatsapp}
+              onChange={handleChange}
+              type="tel"
+              inputMode="numeric"
+              maxLength={11}
+              pattern="[0-9]{11}"
+              className={inputClass}
+              placeholder="If different from phone"
+              disabled={primarySharedLocked}
+            />
           </div>
 
           {!isCollegeFlow && (
@@ -1133,7 +957,7 @@ export default function InquiryCreate({ manualMode = false }) {
   }
 
   return (
-    <div className={`${(!manualMode && secondFormEnabled) ? 'max-w-7xl' : 'max-w-4xl'} mx-auto`}>
+    <div className="max-w-4xl mx-auto">
       <PageHeader
         title={manualMode ? 'Manual Inquiry Entry' : 'New Inquiry'}
         subtitle={manualMode ? 'Manually add inquiry data to the pipeline' : 'Record a new admission inquiry'}
@@ -1141,6 +965,9 @@ export default function InquiryCreate({ manualMode = false }) {
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
+      )}
+      {success && (
+        <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">{success}</div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -1153,22 +980,8 @@ export default function InquiryCreate({ manualMode = false }) {
         ) : (
           <>
             {renderSiblingSection()}
-            {!manualMode && secondFormEnabled ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                <div className="space-y-6">
-                  {renderStudentSection()}
-                  {!isCollegeFlow && renderParentSection()}
-                </div>
-                <div>
-                  {renderSecondFormSection()}
-                </div>
-              </div>
-            ) : (
-              <>
-                {renderStudentSection()}
-                {!isCollegeFlow && renderParentSection()}
-              </>
-            )}
+            {renderStudentSection()}
+            {!isCollegeFlow && renderParentSection()}
 
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-base font-semibold text-gray-900 mb-4">Inquiry Details</h3>
@@ -1302,7 +1115,17 @@ export default function InquiryCreate({ manualMode = false }) {
               <button type="button" onClick={() => navigate('/inquiries')} className="px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
                 Cancel
               </button>
-              <button type="submit" disabled={loading} className="px-6 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
+              {!manualMode && (
+                <button
+                  type="submit"
+                  value="next_sibling"
+                  disabled={loading}
+                  className="px-4 py-2.5 text-sm font-medium text-primary-700 bg-primary-50 border border-primary-300 rounded-lg hover:bg-primary-100 disabled:opacity-50"
+                >
+                  {loading ? 'Saving...' : 'Save & Add Next Sibling'}
+                </button>
+              )}
+              <button type="submit" value="view_detail" disabled={loading} className="px-6 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
                 {loading ? 'Creating...' : 'Create Inquiry'}
               </button>
             </div>

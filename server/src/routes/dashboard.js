@@ -694,21 +694,76 @@ router.get('/recent-activity', async (req, res) => {
     const where = {};
     if (req.user.role === 'staff') {
       where.user_id = req.user.id;
+    } else {
+      const requestedStaffId = Number.parseInt(req.query.staff_id, 10);
+      if (Number.isInteger(requestedStaffId)) {
+        where.user_id = requestedStaffId;
+      }
     }
     const requestedLimit = Number.parseInt(req.query.limit, 10);
     const limit = Number.isInteger(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), 200)
       : 100;
+    const scanLimit = Math.min(Math.max(limit * 5, 100), 1000);
+    const inquiryWhere = await buildInquiryWhere(req);
 
     const activities = await AuditLog.findAll({
       where,
       attributes: ['id', 'action', 'entity_type', 'entity_id', 'old_values', 'new_values', 'created_at', 'user_id'],
       include: [{ model: User, as: 'user', attributes: ['id', 'name'] }],
       order: [['created_at', 'DESC']],
-      limit,
+      limit: scanLimit,
     });
 
-    res.json(activities);
+    const inquiryEntityIds = [];
+    const followUpEntityIds = [];
+    activities.forEach((activity) => {
+      const item = activity?.toJSON ? activity.toJSON() : activity;
+      if (item?.entity_type === 'inquiry' && Number.isInteger(item?.entity_id)) {
+        inquiryEntityIds.push(item.entity_id);
+      }
+      if (item?.entity_type === 'follow_up' && Number.isInteger(item?.entity_id)) {
+        followUpEntityIds.push(item.entity_id);
+      }
+    });
+
+    const allowedInquiryIds = new Set();
+    if (inquiryEntityIds.length > 0) {
+      const scopedInquiries = await Inquiry.findAll({
+        where: {
+          ...inquiryWhere,
+          id: { [Op.in]: [...new Set(inquiryEntityIds)] },
+        },
+        attributes: ['id'],
+        raw: true,
+      });
+      scopedInquiries.forEach((row) => allowedInquiryIds.add(row.id));
+    }
+
+    const allowedFollowUpIds = new Set();
+    if (followUpEntityIds.length > 0) {
+      const scopedFollowUps = await InquiryFollowUp.findAll({
+        where: { id: { [Op.in]: [...new Set(followUpEntityIds)] } },
+        attributes: ['id'],
+        include: [inquiryIncludeForScope(inquiryWhere)],
+      });
+      scopedFollowUps.forEach((row) => allowedFollowUpIds.add(row.id));
+    }
+
+    const scopedActivities = activities
+      .filter((activity) => {
+        const item = activity?.toJSON ? activity.toJSON() : activity;
+        if (item?.entity_type === 'inquiry') {
+          return allowedInquiryIds.has(item.entity_id);
+        }
+        if (item?.entity_type === 'follow_up') {
+          return allowedFollowUpIds.has(item.entity_id);
+        }
+        return true;
+      })
+      .slice(0, limit);
+
+    res.json(scopedActivities);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }

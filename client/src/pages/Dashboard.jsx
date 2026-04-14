@@ -84,6 +84,7 @@ export default function Dashboard() {
   const [staffSearch, setStaffSearch] = useState('');
   const [selectedStaffId, setSelectedStaffId] = useState(null);
   const [activityTimeFilter, setActivityTimeFilter] = useState('all');
+  const [activityStaffFilter, setActivityStaffFilter] = useState('all');
 
   useEffect(() => {
     if (isSuperAdmin(user)) {
@@ -95,7 +96,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboard();
-  }, [campusType, user?.id, user?.role]);
+  }, [campusType, user?.id, user?.role, activityStaffFilter]);
 
   useEffect(() => {
     if (!selectedStaffId) return;
@@ -106,16 +107,44 @@ export default function Dashboard() {
     }
   }, [staffPerformance, controlAnalytics, selectedStaffId]);
 
+  useEffect(() => {
+    if (!isAdminOrAbove(user)) return;
+    if (activityStaffFilter === 'all') return;
+
+    const selectedId = Number.parseInt(activityStaffFilter, 10);
+    if (!Number.isInteger(selectedId)) {
+      setActivityStaffFilter('all');
+      return;
+    }
+
+    const controlRows = controlAnalytics?.staffControl || [];
+    const performanceRows = staffPerformance || [];
+    const exists = [...controlRows, ...performanceRows].some((row) => Number(row?.id) === selectedId);
+    if (!exists) {
+      setActivityStaffFilter('all');
+    }
+  }, [activityStaffFilter, controlAnalytics, staffPerformance, user?.role]);
+
   async function loadDashboard() {
     setLoading(true);
     try {
       const params = (isSuperAdmin(user) && campusType !== 'all') ? { campus_type: campusType } : {};
+      const activityParams = {
+        ...params,
+        limit: isAdminOrAbove(user) ? 200 : 100,
+      };
+      if (isAdminOrAbove(user) && activityStaffFilter !== 'all') {
+        const staffId = Number.parseInt(activityStaffFilter, 10);
+        if (Number.isInteger(staffId)) {
+          activityParams.staff_id = staffId;
+        }
+      }
 
       const [admRes, fuRes, remRes, actRes, commRes, spRes, caRes] = await Promise.all([
         api.get('/dashboard/admission-stats', { params }),
         api.get('/dashboard/follow-up-stats', { params }),
         api.get('/inquiries/reminders', { params }),
-        api.get('/dashboard/recent-activity', { params: { ...params, limit: isAdminOrAbove(user) ? 200 : 100 } }),
+        api.get('/dashboard/recent-activity', { params: activityParams }),
         api.get('/dashboard/communication-stats', { params }),
         isAdminOrAbove(user)
           ? api.get('/dashboard/staff-performance', { params }).catch(() => ({ data: null }))
@@ -294,6 +323,10 @@ export default function Dashboard() {
   });
 
   const mergedStaffRows = Array.from(mergedStaffMap.values());
+  const activityStaffOptions = mergedStaffRows
+    .filter((row) => Number.isInteger(Number(row?.id)))
+    .map((row) => ({ id: Number(row.id), name: row.name || `Staff #${row.id}` }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const filteredStaffRows = mergedStaffRows.filter((item) => {
     if (staffRoleFilter !== 'all' && item.role !== staffRoleFilter) return false;
@@ -1068,15 +1101,27 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h3 className="text-sm font-semibold text-gray-900">Recent Activity</h3>
-            <select
-              value={activityTimeFilter}
-              onChange={e => setActivityTimeFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
-            >
-              {ACTIVITY_TIME_FILTERS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={activityStaffFilter}
+                onChange={e => setActivityStaffFilter(e.target.value)}
+                className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+              >
+                <option value="all">All Staff Activity</option>
+                {activityStaffOptions.map((staffOption) => (
+                  <option key={staffOption.id} value={String(staffOption.id)}>{staffOption.name}</option>
+                ))}
+              </select>
+              <select
+                value={activityTimeFilter}
+                onChange={e => setActivityTimeFilter(e.target.value)}
+                className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+              >
+                {ACTIVITY_TIME_FILTERS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <p className="text-[11px] text-gray-500 mb-3">
             Showing {filteredRecentActivity.length} of {recentActivity.length} activities

@@ -129,6 +129,15 @@ export default function InquiryList() {
   const filterConfig = [
     { key: 'status', label: 'All Statuses', options: INQUIRY_STATUSES.map(s => ({ value: s.value, label: s.label })) },
     { key: 'priority', label: 'All Priorities', options: PRIORITIES.map(p => ({ value: p.value, label: p.label })) },
+    {
+      key: 'is_manual_entry',
+      label: 'All Entry Types',
+      singleSelect: true,
+      options: [
+        { value: 'true', label: 'Manual Entry' },
+        { value: 'false', label: 'Regular Entry' },
+      ],
+    },
   ];
 
   if (isSuperAdmin(user)) {
@@ -285,6 +294,11 @@ export default function InquiryList() {
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <InquiryStatusBadge status={inq.status} />
                     <PriorityBadge priority={inq.priority} />
+                    {inq.is_manual_entry && (
+                      <span className="text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5 font-medium">
+                        Manual
+                      </span>
+                    )}
                     {inq.classApplying && (
                       <span className="text-xs text-gray-500 bg-gray-100 rounded px-2 py-0.5">{inq.classApplying.name}</span>
                     )}
@@ -335,6 +349,11 @@ export default function InquiryList() {
                       <td className="px-4 py-3">
                         <span className="font-medium text-gray-900">{inq.student_name}</span>
                         <p className="text-xs text-gray-400">{formatDate(inq.inquiry_date)}</p>
+                        {inq.is_manual_entry && (
+                          <span className="inline-flex mt-1 text-[11px] bg-blue-100 text-blue-700 rounded px-1.5 py-0.5 font-medium">
+                            Manual
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
                       <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>

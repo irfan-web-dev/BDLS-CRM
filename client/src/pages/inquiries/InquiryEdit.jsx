@@ -7,6 +7,16 @@ import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, LAHORE_AREAS }
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
+const PHONE_FIELDS = new Set(['parent_phone', 'parent_whatsapp', 'student_phone']);
+
+function normalizePhoneInput(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 11);
+}
+
+function isValidPhoneInput(value) {
+  return /^\d{11}$/.test(String(value || ''));
+}
+
 export default function InquiryEdit() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -26,13 +36,14 @@ export default function InquiryEdit() {
   const [areaSearch, setAreaSearch] = useState('');
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const areaRef = useRef(null);
+  const today = new Date().toISOString().split('T')[0];
 
   const [form, setForm] = useState({
     parent_name: '', relationship: 'father', parent_phone: '', parent_whatsapp: '',
     parent_email: '', city: 'Lahore', area: '', student_name: '', date_of_birth: '',
     gender: '', student_phone: '', class_applying_id: '', current_school: '',
     previous_institute: '', previous_marks_obtained: '', previous_total_marks: '', previous_major_subjects: '',
-    special_needs: '', source_id: '', referral_parent_name: '',
+    special_needs: '', inquiry_date: '', source_id: '', referral_parent_name: '',
     campus_id: user?.campus_id || '', package_name: '', package_amount: '', session_preference: '', assigned_staff_id: '',
     inquiry_form_taken: '', priority: 'normal', notes: '', tag_ids: [],
   });
@@ -110,7 +121,7 @@ export default function InquiryEdit() {
         previous_marks_obtained: inq.previous_marks_obtained || '',
         previous_total_marks: inq.previous_total_marks || '',
         previous_major_subjects: inq.previous_major_subjects || '',
-        special_needs: inq.special_needs || '', source_id: inq.source_id || '',
+        special_needs: inq.special_needs || '', inquiry_date: inq.inquiry_date || '', source_id: inq.source_id || '',
         referral_parent_name: inq.referral_parent_name || '', campus_id: inq.campus_id || '',
         package_name: inq.package_name || '', package_amount: inq.package_amount || '',
         session_preference: inq.session_preference || '', assigned_staff_id: inq.assigned_staff_id || '',
@@ -204,7 +215,9 @@ export default function InquiryEdit() {
   }
 
   function handleChange(e) {
-    setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    const normalizedValue = PHONE_FIELDS.has(name) ? normalizePhoneInput(value) : value;
+    setForm(prev => ({ ...prev, [name]: normalizedValue }));
   }
 
   function handleTagToggle(tagId) {
@@ -219,6 +232,31 @@ export default function InquiryEdit() {
     setError('');
     setSaving(true);
     try {
+      if (form.inquiry_date && form.inquiry_date > today) {
+        throw new Error('Inquiry date cannot be in the future');
+      }
+
+      const parentPhone = String(form.parent_phone || '').trim();
+      const studentPhone = String(form.student_phone || '').trim();
+      const whatsappPhone = String(form.parent_whatsapp || '').trim();
+
+      if (!isCollegeFlow) {
+        if (!isValidPhoneInput(parentPhone)) {
+          throw new Error('Parent phone must be exactly 11 digits');
+        }
+      } else if (parentPhone && !isValidPhoneInput(parentPhone)) {
+        throw new Error('Parent phone must be exactly 11 digits');
+      } else if (!parentPhone && !studentPhone) {
+        throw new Error('At least one phone number (parent or student) is required');
+      }
+
+      if (studentPhone && !isValidPhoneInput(studentPhone)) {
+        throw new Error('Student phone must be exactly 11 digits');
+      }
+      if (whatsappPhone && !isValidPhoneInput(whatsappPhone)) {
+        throw new Error('WhatsApp number must be exactly 11 digits');
+      }
+
       const data = { ...form };
       Object.keys(data).forEach(k => { if (data[k] === '') data[k] = null; });
       if (data.class_applying_id) data.class_applying_id = parseInt(data.class_applying_id, 10);
@@ -294,7 +332,19 @@ export default function InquiryEdit() {
 
           {isCollegeFlow ? (
             <>
-              <div><label className={labelClass}>Student Phone</label><input name="student_phone" value={form.student_phone} onChange={handleChange} className={inputClass} /></div>
+              <div>
+                <label className={labelClass}>Student Phone</label>
+                <input
+                  name="student_phone"
+                  value={form.student_phone}
+                  onChange={handleChange}
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{11}"
+                  className={inputClass}
+                />
+              </div>
               <div><label className={labelClass}>Priority</label><select name="priority" value={form.priority} onChange={handleChange} className={inputClass}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></div>
               <div><label className={labelClass}>Previous Institute</label><input name="previous_institute" value={form.previous_institute} onChange={handleChange} className={inputClass} /></div>
               <div><label className={labelClass}>Major Subjects</label><input name="previous_major_subjects" value={form.previous_major_subjects} onChange={handleChange} className={inputClass} placeholder="e.g. Biology, Chemistry" /></div>
@@ -320,8 +370,33 @@ export default function InquiryEdit() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div><label className={labelClass}>Parent Full Name *</label><input name="parent_name" value={form.parent_name} onChange={handleChange} required className={inputClass} /></div>
           <div><label className={labelClass}>Relationship *</label><select name="relationship" value={form.relationship} onChange={handleChange} className={inputClass}>{RELATIONSHIPS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}</select></div>
-          <div><label className={labelClass}>Parent Phone *</label><input name="parent_phone" value={form.parent_phone} onChange={handleChange} required className={inputClass} /></div>
-          <div><label className={labelClass}>WhatsApp</label><input name="parent_whatsapp" value={form.parent_whatsapp} onChange={handleChange} className={inputClass} /></div>
+          <div>
+            <label className={labelClass}>Parent Phone *</label>
+            <input
+              name="parent_phone"
+              value={form.parent_phone}
+              onChange={handleChange}
+              type="tel"
+              inputMode="numeric"
+              maxLength={11}
+              pattern="[0-9]{11}"
+              required
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>WhatsApp</label>
+            <input
+              name="parent_whatsapp"
+              value={form.parent_whatsapp}
+              onChange={handleChange}
+              type="tel"
+              inputMode="numeric"
+              maxLength={11}
+              pattern="[0-9]{11}"
+              className={inputClass}
+            />
+          </div>
 
           {!isCollegeFlow && (
             <>
@@ -352,6 +427,18 @@ export default function InquiryEdit() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <h3 className="text-base font-semibold text-gray-900 mb-4">Inquiry Details</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Inquiry Date *</label>
+              <input
+                name="inquiry_date"
+                type="date"
+                value={form.inquiry_date}
+                onChange={handleChange}
+                max={today}
+                required
+                className={inputClass}
+              />
+            </div>
             <div><label className={labelClass}>Source</label><select name="source_id" value={form.source_id} onChange={handleChange} className={inputClass}><option value="">Select</option>{sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             <div><label className={labelClass}>Referral Parent</label><input name="referral_parent_name" value={form.referral_parent_name} onChange={handleChange} className={inputClass} /></div>
             {isCollegeFlow ? (
