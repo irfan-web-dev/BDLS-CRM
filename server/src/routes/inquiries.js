@@ -285,7 +285,7 @@ router.get('/', async (req, res) => {
       status, campus_id, class_id, source_id, assigned_staff_id,
       priority, date_from, date_to, search, tag_id,
       gender, area, previous_institute, followup_today, followup_filter,
-      is_manual_entry,
+      is_manual_entry, is_sibling: is_sibling_filter,
       page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC',
     } = req.query;
 
@@ -308,6 +308,16 @@ router.get('/', async (req, res) => {
         where.is_manual_entry = manualValues[0];
       } else if (manualValues.length > 1) {
         where.is_manual_entry = { [Op.in]: manualValues };
+      }
+    }
+    if (is_sibling_filter !== undefined && is_sibling_filter !== null && is_sibling_filter !== '') {
+      const isSib = parseNullableBoolean(is_sibling_filter);
+      if (isSib) {
+        // Show both primary and child siblings
+        where[Op.or] = [{ is_sibling: true }, { sibling_group_id: { [Op.ne]: null } }];
+      } else {
+        where.is_sibling = false;
+        where.sibling_group_id = null;
       }
     }
     if (gender) where.gender = gender.includes(',') ? { [Op.in]: gender.split(',') } : gender;
@@ -868,6 +878,14 @@ router.post('/', async (req, res) => {
     }, inquiryPayload);
 
     const inquiry = await Inquiry.create(inquiryPayload);
+
+    // Update primary sibling's group_id if not set yet
+    if (siblingLink.sibling_of_inquiry_id && siblingLink.sibling_group_id) {
+      await Inquiry.update(
+        { sibling_group_id: siblingLink.sibling_group_id },
+        { where: { id: siblingLink.sibling_of_inquiry_id, sibling_group_id: null } }
+      ).catch(() => {});
+    }
 
     // Attach tags
     if (tag_ids && tag_ids.length > 0) {

@@ -167,6 +167,7 @@ export default function InquiryList() {
   filterConfig.push(
     { key: 'class_id', label: 'All Classes', options: classes.map(c => ({ value: c.id, label: c.name })) },
     { key: 'source_id', label: 'All Sources', options: sources.map(s => ({ value: s.id, label: s.name })) },
+    { key: 'is_sibling', label: 'Siblings', singleSelect: true, options: [{ value: 'true', label: 'Siblings Only' }, { value: 'false', label: 'Non-Siblings Only' }] },
   );
 
   if (isAdminOrAbove(user)) {
@@ -280,7 +281,10 @@ export default function InquiryList() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium text-gray-900 truncate">{inq.student_name}</p>
+                      <p className="font-medium text-gray-900 truncate">
+                        {inq.student_name}
+                        {(inq.is_sibling || inq.sibling_group_id) && <span className="ml-1.5 text-[10px] font-medium bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">Sibling</span>}
+                      </p>
                       <p className="text-sm text-gray-500 truncate">{inq.parent_name} &middot; {inq.parent_phone}</p>
                     </div>
                     <button
@@ -349,11 +353,14 @@ export default function InquiryList() {
                       <td className="px-4 py-3">
                         <span className="font-medium text-gray-900">{inq.student_name}</span>
                         <p className="text-xs text-gray-400">{formatDate(inq.inquiry_date)}</p>
-                        {inq.is_manual_entry && (
-                          <span className="inline-flex mt-1 text-[11px] bg-blue-100 text-blue-700 rounded px-1.5 py-0.5 font-medium">
-                            Manual
-                          </span>
-                        )}
+                        <div className="flex gap-1 mt-1">
+                          {inq.is_manual_entry && (
+                            <span className="inline-flex text-[11px] bg-blue-100 text-blue-700 rounded px-1.5 py-0.5 font-medium">Manual</span>
+                          )}
+                          {(inq.is_sibling || inq.sibling_group_id) && (
+                            <span className="inline-flex text-[11px] bg-violet-100 text-violet-700 rounded px-1.5 py-0.5 font-medium">Sibling</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
                       <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>

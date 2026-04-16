@@ -767,7 +767,7 @@ function FollowUpModal({ isOpen, onClose, inquiryId, onSuccess }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Duration (min)</label>
-            <input name="duration_minutes" type="number" value={form.duration_minutes} onChange={handleChange} className={inputClass} />
+            <input name="duration_minutes" type="number" min="0" value={form.duration_minutes} onChange={handleChange} className={inputClass} />
           </div>
         </div>
         <div>

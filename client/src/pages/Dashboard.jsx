@@ -96,7 +96,21 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadDashboard();
-  }, [campusType, user?.id, user?.role, activityStaffFilter]);
+  }, [campusType, user?.id, user?.role]);
+
+  // Reload only recent activity when staff filter changes
+  useEffect(() => {
+    if (!user?.id) return;
+    const params = (isSuperAdmin(user) && campusType !== 'all') ? { campus_type: campusType } : {};
+    const activityParams = { ...params, limit: isAdminOrAbove(user) ? 200 : 100 };
+    if (isAdminOrAbove(user) && activityStaffFilter !== 'all') {
+      const staffId = Number.parseInt(activityStaffFilter, 10);
+      if (Number.isInteger(staffId)) activityParams.staff_id = staffId;
+    }
+    api.get('/dashboard/recent-activity', { params: activityParams })
+      .then(res => setRecentActivity(res.data))
+      .catch(() => {});
+  }, [activityStaffFilter]);
 
   useEffect(() => {
     if (!selectedStaffId) return;
