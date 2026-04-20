@@ -382,14 +382,14 @@ export default function Reports() {
         <CampusTypeTabs value={campusType} onChange={setCampusType} className="mb-4" />
       )}
 
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 overflow-x-auto">
+      <div className="mb-6 flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
         {tabs.map(tab => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
+              className={`flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
                 activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -417,7 +417,7 @@ export default function Reports() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Total Inquiries</p>
               <p className="text-2xl font-bold text-gray-900">{admissionStats?.totalInquiries ?? 0}</p>
@@ -513,11 +513,28 @@ export default function Reports() {
 
             <div className="bg-white rounded-xl shadow-sm border p-5">
               <h4 className="text-sm font-semibold text-gray-900 mb-4">Staff Performance Snapshot</h4>
-              <div className="overflow-auto max-h-[370px]">
+              <div className="max-h-[370px] overflow-y-auto overflow-x-hidden">
                 {overallStaffData.length === 0 ? (
                   <p className="text-sm text-gray-400">No staff performance data available.</p>
                 ) : (
-                  <table className="w-full text-sm">
+                  <>
+                    <div className="space-y-2 md:hidden">
+                      {overallStaffData.slice(0, 10).map((row) => (
+                        <div key={row.id} className="rounded-lg border border-gray-100 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{row.name}</p>
+                            <p className="text-xs text-gray-500">{row.conversionRate}% Conv.</p>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                            <span className="rounded bg-gray-50 px-2 py-1 text-gray-700">Inquiries: {row.totalInquiries}</span>
+                            <span className="rounded bg-green-50 px-2 py-1 text-green-700">Admitted: {row.admittedCount}</span>
+                            <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">Today: {row.followUpsToday}</span>
+                            <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">Month: {row.followUpsThisMonth}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <table className="hidden w-full text-sm md:table">
                     <thead>
                       <tr className="text-xs text-gray-500 uppercase border-b">
                         <th className="py-2 text-left">Staff</th>
@@ -538,7 +555,8 @@ export default function Reports() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                    </table>
+                  </>
                 )}
               </div>
             </div>
@@ -624,7 +642,7 @@ export default function Reports() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="bg-white rounded-xl shadow-sm border p-4">
                   <p className="text-xs text-gray-500">Session</p>
                   <p className="text-2xl font-bold text-gray-900">{completeReport.sessionLabel || '-'}</p>
@@ -653,8 +671,36 @@ export default function Reports() {
                   <span className="text-[11px] font-semibold px-2 py-1 rounded bg-rose-100 text-rose-700">Admission File Status</span>
                 </div>
 
-                <div className="overflow-auto max-h-[34rem]">
-                  <table className="min-w-[1320px] w-full text-xs">
+                <div className="space-y-3 p-3 md:hidden">
+                  {safeList(completeReport.rows).map((row, idx) => (
+                    <div key={row.id || `${row.discipline}-${idx}`} className="rounded-lg border border-gray-100 bg-white p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{idx + 1}. {row.discipline}</p>
+                        <p className="text-xs text-gray-500">To Date: {row.inquiryToDate}</p>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                        <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">Inquiry Today: {row.inquiryToday}</span>
+                        <span className="rounded bg-purple-50 px-2 py-1 text-purple-700">Form Paid: {row.formToDatePaid}</span>
+                        <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Admissions: {row.admissionToDate}</span>
+                        <span className="rounded bg-cyan-50 px-2 py-1 text-cyan-700">Follow-up: {row.followUpToDate}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {completeReport?.totals && (
+                    <div className="rounded-lg border border-gray-900 bg-gray-900 p-3 text-white">
+                      <p className="text-xs font-semibold">Grand Total</p>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                        <span>Total Inquiries: {completeReport.totals.inquiryToDate || 0}</span>
+                        <span>Admissions: {completeReport.totals.admissionToDate || 0}</span>
+                        <span>Forms Paid: {completeReport.totals.formToDatePaid || 0}</span>
+                        <span>Follow-up: {completeReport.totals.followUpToDate || 0}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="hidden max-h-[34rem] overflow-auto md:block">
+                  <table className="w-full min-w-[1320px] text-xs">
                   <thead>
                     <tr className="border-b text-gray-700 sticky top-0 z-20">
                       <th className="px-2 py-2 bg-gray-100" rowSpan={2}>SR #</th>
@@ -754,14 +800,14 @@ export default function Reports() {
 
       {activeTab === 'inquiry' && admissionStats && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-gray-900">Inquiry Summary</h3>
             <button onClick={downloadInquiryReport} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
               <Download className="h-4 w-4" /> Download CSV
             </button>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Total Inquiries</p>
               <p className="text-2xl font-bold text-gray-900">{admissionStats.totalInquiries}</p>
@@ -816,14 +862,14 @@ export default function Reports() {
 
       {activeTab === 'communication' && commStats && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-gray-900">Communication Summary</h3>
             <button onClick={downloadCommReport} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
               <Download className="h-4 w-4" /> Download CSV
             </button>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Contacted</p>
               <p className="text-2xl font-bold text-green-600">{commStats.contacted}</p>
@@ -892,7 +938,7 @@ export default function Reports() {
 
       {activeTab === 'staff' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-lg font-semibold text-gray-900">Staff Performance</h3>
             {staffPerformance && (
               <button onClick={downloadStaffReport} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
@@ -902,7 +948,30 @@ export default function Reports() {
           </div>
 
           {staffPerformance ? (
-            <div className="bg-white rounded-xl shadow-sm border overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-sm border">
+              <div className="space-y-2 p-3 md:hidden">
+                {safeList(staffPerformance).map((s) => (
+                  <div key={s.id} className="rounded-lg border border-gray-100 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{s.name}</p>
+                      <span className={`rounded px-2 py-0.5 text-[11px] font-medium ${
+                        parseFloat(s.conversionRate) >= 20 ? 'bg-green-100 text-green-700' :
+                        parseFloat(s.conversionRate) >= 10 ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {s.conversionRate}%
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                      <span className="rounded bg-gray-50 px-2 py-1 text-gray-700">Inquiries: {s.totalInquiries}</span>
+                      <span className="rounded bg-green-50 px-2 py-1 text-green-700">Admitted: {s.admittedCount}</span>
+                      <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">Month: {s.followUpsThisMonth}</span>
+                      <span className="rounded bg-purple-50 px-2 py-1 text-purple-700">Today: {s.followUpsToday}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b">
@@ -935,6 +1004,7 @@ export default function Reports() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           ) : (
             <div className="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">

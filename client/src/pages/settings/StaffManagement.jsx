@@ -113,7 +113,31 @@ export default function StaffManagement() {
         </button>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div className="space-y-2 p-3 md:hidden">
+          {users.map((u) => (
+            <div key={u.id} className="rounded-lg border border-gray-100 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-gray-900">{u.name}</p>
+                  <p className="truncate text-xs text-gray-500">{u.email}</p>
+                </div>
+                <Badge color={u.is_active ? 'green' : 'red'}>{u.is_active ? 'Active' : 'Inactive'}</Badge>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <Badge color={roleColors[u.role]}>{u.role.replace('_', ' ')}</Badge>
+                <span className="text-gray-600">{u.campus?.name || '-'}</span>
+              </div>
+              <div className="mt-2 flex justify-end gap-1">
+                <button onClick={() => openEdit(u)} className="rounded p-1.5 text-gray-400 hover:bg-gray-100"><Edit2 className="h-4 w-4" /></button>
+                {u.role !== 'super_admin' && (
+                  <button onClick={() => setDeleteTarget(u)} className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b">
@@ -145,20 +169,21 @@ export default function StaffManagement() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <Modal isOpen={modal} onClose={() => setModal(false)} title={editing ? 'Edit Staff' : 'Add Staff'} size="md">
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Name *</label><input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} required className={inputClass} /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Email *</label><input type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} required className={inputClass} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))} className={inputClass} /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">{editing ? 'New Password' : 'Password *'}</label><input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))} {...(!editing && { required: true })} className={inputClass} placeholder={editing ? 'Leave blank to keep current' : ''} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
               <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))} className={inputClass}>

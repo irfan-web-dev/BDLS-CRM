@@ -680,7 +680,7 @@ export default function Dashboard() {
       )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
+      <div className="grid grid-cols-1 gap-4 mb-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         <StatCard
           title="Today"
           value={admissionStats?.todayCount || 0}
@@ -745,8 +745,24 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
             <div className="xl:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-sm font-semibold text-gray-900 mb-4">{performanceTitle}</h3>
-              <div className="h-80 overflow-auto">
-                <table className="w-full text-sm">
+              <div className="h-80 overflow-y-auto overflow-x-hidden">
+                <div className="space-y-2 md:hidden">
+                  {classPerformance.map((item) => (
+                    <div key={item.className} className="rounded-lg border border-gray-100 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{item.className}</p>
+                        <p className="text-xs font-medium text-gray-500">{item.conversionRate}% Conv.</p>
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 gap-2 text-[11px]">
+                        <span className="rounded bg-gray-50 px-2 py-1 text-gray-700 text-center">T: {item.total}</span>
+                        <span className="rounded bg-blue-50 px-2 py-1 text-blue-700 text-center">A: {item.active}</span>
+                        <span className="rounded bg-green-50 px-2 py-1 text-green-700 text-center">Ad: {item.admitted}</span>
+                        <span className="rounded bg-red-50 px-2 py-1 text-red-700 text-center">O: {item.overdue}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <table className="hidden w-full text-sm md:table">
                   <thead>
                     <tr className="text-left text-xs text-gray-500 border-b">
                       <th className="pb-2 font-medium">{performanceColumnTitle}</th>
@@ -803,13 +819,13 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
-              <h3 className="text-sm font-semibold text-gray-900">Staff Control Panel</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 lg:min-w-[34rem]">
-                <select
-                  value={staffRoleFilter}
-                  onChange={e => setStaffRoleFilter(e.target.value)}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-6">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+                <h3 className="text-sm font-semibold text-gray-900">Staff Control Panel</h3>
+                <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3 lg:max-w-[34rem]">
+                  <select
+                    value={staffRoleFilter}
+                    onChange={e => setStaffRoleFilter(e.target.value)}
                   className="rounded-lg border border-gray-300 py-1.5 px-3 text-xs outline-none"
                 >
                   <option value="all">All Roles</option>
@@ -832,55 +848,85 @@ export default function Dashboard() {
                   onChange={e => setStaffSearch(e.target.value)}
                   placeholder="Search staff"
                   className="rounded-lg border border-gray-300 py-1.5 px-3 text-xs outline-none"
-                />
+                  />
+                </div>
               </div>
-            </div>
-            <div className="h-80 overflow-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-gray-500 border-b">
-                    <th className="pb-2 font-medium">Staff</th>
-                    <th className="pb-2 font-medium text-center">Assigned</th>
-                    <th className="pb-2 font-medium text-center">Active</th>
-                    <th className="pb-2 font-medium text-center">Admitted</th>
-                    <th className="pb-2 font-medium text-center">Follow-ups</th>
-                    <th className="pb-2 font-medium text-center">Overdue</th>
-                    <th className="pb-2 font-medium text-center">Score</th>
-                    <th className="pb-2 font-medium text-center">Inquiries</th>
-                    <th className="pb-2 font-medium text-center">Converted</th>
-                    <th className="pb-2 font-medium text-center">Today</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredStaffRows.map(s => (
-                    <tr
+              <div className="h-80 overflow-y-auto overflow-x-hidden">
+                <div className="space-y-2 md:hidden">
+                  {filteredStaffRows.map((s) => (
+                    <button
                       key={s.id}
+                      type="button"
                       onClick={() => setSelectedStaffId(s.id)}
-                      className={`border-b border-gray-50 cursor-pointer ${
-                        selectedStaffId === s.id ? 'bg-primary-50' : 'hover:bg-gray-50'
+                      className={`w-full rounded-lg border p-3 text-left ${
+                        selectedStaffId === s.id
+                          ? 'border-primary-200 bg-primary-50'
+                          : 'border-gray-100 bg-white'
                       }`}
                     >
-                      <td className="py-2.5 font-medium text-gray-900">{s.name}</td>
-                      <td className="py-2.5 text-center">{s.totalAssigned}</td>
-                      <td className="py-2.5 text-center text-blue-600">{s.activeAssigned}</td>
-                      <td className="py-2.5 text-center text-green-600">{s.admittedCount}</td>
-                      <td className="py-2.5 text-center">{s.followUpsThisMonth}</td>
-                      <td className="py-2.5 text-center text-red-600">{s.overdueCount}</td>
-                      <td className="py-2.5 text-center font-semibold">{s.activityScore}</td>
-                      <td className="py-2.5 text-center">{s.inquiries}</td>
-                      <td className="py-2.5 text-center text-green-600">{s.converted}</td>
-                      <td className="py-2.5 text-center">{s.today}</td>
-                    </tr>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{s.name}</p>
+                        <p className="text-[11px] capitalize text-gray-500">{s.role?.replace('_', ' ')}</p>
+                      </div>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                        <span className="rounded bg-gray-50 px-2 py-1 text-center text-gray-700">Assigned: {s.totalAssigned}</span>
+                        <span className="rounded bg-blue-50 px-2 py-1 text-center text-blue-700">Active: {s.activeAssigned}</span>
+                        <span className="rounded bg-green-50 px-2 py-1 text-center text-green-700">Admit: {s.admittedCount}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-4 gap-2 text-[11px]">
+                        <span className="rounded bg-gray-50 px-2 py-1 text-center text-gray-700">FU: {s.followUpsThisMonth}</span>
+                        <span className="rounded bg-red-50 px-2 py-1 text-center text-red-700">OD: {s.overdueCount}</span>
+                        <span className="rounded bg-indigo-50 px-2 py-1 text-center text-indigo-700">Score: {s.activityScore}</span>
+                        <span className="rounded bg-emerald-50 px-2 py-1 text-center text-emerald-700">Today: {s.today}</span>
+                      </div>
+                    </button>
                   ))}
-                </tbody>
-              </table>
-              {filteredStaffRows.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-8">No staff match current filters.</p>
-              )}
-            </div>
-            {selectedStaff && (
-              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                <p className="text-sm font-semibold text-gray-900">{selectedStaff.name}</p>
+                </div>
+                <table className="hidden w-full text-sm md:table">
+                  <thead>
+                    <tr className="text-left text-xs text-gray-500 border-b">
+                      <th className="pb-2 font-medium">Staff</th>
+                      <th className="pb-2 font-medium text-center">Assigned</th>
+                      <th className="pb-2 font-medium text-center">Active</th>
+                      <th className="pb-2 font-medium text-center">Admitted</th>
+                      <th className="pb-2 font-medium text-center">Follow-ups</th>
+                      <th className="pb-2 font-medium text-center">Overdue</th>
+                      <th className="pb-2 font-medium text-center">Score</th>
+                      <th className="pb-2 font-medium text-center">Inquiries</th>
+                      <th className="pb-2 font-medium text-center">Converted</th>
+                      <th className="pb-2 font-medium text-center">Today</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredStaffRows.map(s => (
+                      <tr
+                        key={s.id}
+                        onClick={() => setSelectedStaffId(s.id)}
+                        className={`border-b border-gray-50 cursor-pointer ${
+                          selectedStaffId === s.id ? 'bg-primary-50' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <td className="py-2.5 font-medium text-gray-900">{s.name}</td>
+                        <td className="py-2.5 text-center">{s.totalAssigned}</td>
+                        <td className="py-2.5 text-center text-blue-600">{s.activeAssigned}</td>
+                        <td className="py-2.5 text-center text-green-600">{s.admittedCount}</td>
+                        <td className="py-2.5 text-center">{s.followUpsThisMonth}</td>
+                        <td className="py-2.5 text-center text-red-600">{s.overdueCount}</td>
+                        <td className="py-2.5 text-center font-semibold">{s.activityScore}</td>
+                        <td className="py-2.5 text-center">{s.inquiries}</td>
+                        <td className="py-2.5 text-center text-green-600">{s.converted}</td>
+                        <td className="py-2.5 text-center">{s.today}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {filteredStaffRows.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-8">No staff match current filters.</p>
+                )}
+              </div>
+              {selectedStaff && (
+                <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                  <p className="text-sm font-semibold text-gray-900">{selectedStaff.name}</p>
                 <p className="text-xs text-gray-600 mt-1">
                   Role: {selectedStaff.role?.replace('_', ' ')} · Conversion: {selectedStaff.performanceConversionRate}% · Follow-ups Today: {selectedStaff.today}
                 </p>

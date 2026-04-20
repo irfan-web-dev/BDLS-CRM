@@ -208,7 +208,32 @@ export default function Students() {
         {paginatedStudents.length === 0 ? (
           <EmptyState title="No students found" message="Try changing filters or search terms." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="space-y-2 p-3 md:hidden">
+              {paginatedStudents.map((student) => (
+                <div key={student.id} className="rounded-lg border border-gray-100 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-900">{student.name}</p>
+                      <p className="truncate text-xs text-gray-500">{student.email || '-'}</p>
+                    </div>
+                    <Badge color={student.is_active ? 'green' : 'red'}>
+                      {student.is_active ? 'Active' : 'Inactive'}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-gray-600">
+                    <p>Phone: {student.phone || '-'}</p>
+                    <p>Campus: {student.campus?.name || '-'}</p>
+                    <div>
+                      <Badge color={(student.campus?.campus_type || 'school') === 'college' ? 'blue' : 'gray'}>
+                        {campusTypeLabel(student.campus?.campus_type)}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs font-medium text-gray-500 uppercase border-b">
@@ -242,7 +267,8 @@ export default function Students() {
                 ))}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
 
         <Pagination

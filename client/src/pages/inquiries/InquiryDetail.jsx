@@ -242,7 +242,7 @@ export default function InquiryDetail() {
         title={inquiry.student_name}
         subtitle={`Inquiry #${inquiry.id} — ${inquiry.parent_name}`}
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setStatusModal(true)}
               className="inline-flex items-center gap-1 rounded-lg bg-white border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
@@ -268,8 +268,8 @@ export default function InquiryDetail() {
       />
 
       {/* Status Pipeline */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6 overflow-x-auto">
-        <div className="flex items-center gap-1 min-w-max">
+      <div className="mb-6 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1">
           {INQUIRY_STATUSES.slice(0, 10).map((s, i) => {
             const isCurrent = inquiry.status === s.value;
             const isPast = INQUIRY_STATUSES.findIndex(st => st.value === inquiry.status) > i;
@@ -280,9 +280,9 @@ export default function InquiryDetail() {
                   isCurrent ? `${colorMap[s.color] || 'bg-gray-500'} text-white` :
                   isPast ? 'bg-gray-200 text-gray-600' : 'bg-gray-100 text-gray-400'
                 }`}>
-                  <span className="whitespace-nowrap">{s.label}</span>
+                  <span>{s.label}</span>
                 </div>
-                {i < 9 && <ChevronRight className="h-3 w-3 text-gray-300 mx-0.5 shrink-0" />}
+                {i < 9 && <ChevronRight className="mx-0.5 h-3 w-3 shrink-0 text-gray-300" />}
               </div>
             );
           })}
@@ -296,7 +296,7 @@ export default function InquiryDetail() {
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex gap-6">
+        <nav className="flex flex-wrap gap-4">
           {['overview', 'followUps', 'activity'].map(tab => (
             <button
               key={tab}

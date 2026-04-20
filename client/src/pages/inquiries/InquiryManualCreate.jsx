@@ -336,8 +336,8 @@ export default function InquiryManualCreate() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-        <table className="w-full text-sm min-w-[1200px]">
+      <div className="overflow-x-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+        <table className="w-full table-fixed text-sm">
           <thead>
             <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
               <th className="px-3 py-3">Student *</th>

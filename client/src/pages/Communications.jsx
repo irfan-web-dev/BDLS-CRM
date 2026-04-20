@@ -345,7 +345,7 @@ export default function Communications() {
               <summary className="list-none cursor-pointer rounded-lg border border-gray-300 bg-white py-1.5 px-3 text-sm text-gray-700 hover:bg-gray-50">
                 Staff Filter{selectedStaffIds.length > 0 ? ` (${selectedStaffIds.length})` : ''}
               </summary>
-              <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+              <div className="absolute left-0 z-20 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white p-3 shadow-lg sm:left-auto sm:right-0 sm:w-72">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Select Staff</p>
                 <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
                   {staffOptions.map((staff) => (
