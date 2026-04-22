@@ -29,8 +29,8 @@ export function AuthProvider({ children }) {
     document.title = getPortalTitle(user);
   }, [user]);
 
-  const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
+  const login = async (identifier, password) => {
+    const res = await api.post('/auth/login', { identifier, password });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
     const campusType = res.data?.user?.campus?.campus_type || res.data?.user?.campus_type;

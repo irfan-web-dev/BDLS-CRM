@@ -8,13 +8,20 @@ const router = Router();
 // POST /api/auth/login - Login via Shared API
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, username, rollno, roll_no, identifier, password } = req.body;
+    const rawIdentifier = [identifier, email, username, rollno, roll_no]
+      .find((value) => typeof value === 'string' && value.trim().length > 0);
+    const loginIdentifier = rawIdentifier ? rawIdentifier.trim() : '';
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    if (!loginIdentifier || !password) {
+      return res.status(400).json({ error: 'Email/username/rollno and password are required' });
     }
 
-    const result = await sharedClient.login({ email, password });
+    const credentials = { password };
+    if (loginIdentifier.includes('@')) credentials.email = loginIdentifier;
+    else credentials.username = loginIdentifier;
+
+    const result = await sharedClient.login(credentials);
 
     // Only allow admin/staff roles to log into CRM
     const allowedTypes = ['super_admin', 'campus_admin', 'staff', 'branch_staff'];
@@ -64,7 +71,7 @@ router.post('/login', async (req, res) => {
     res.json({ token: result.token, user: userData });
   } catch (error) {
     if (error.status === 401) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
     console.error('Login error:', error);
     res.status(500).json({ error: 'Server error' });
