@@ -7,7 +7,9 @@ import {
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { formatDate, formatDateTime, relativeTime, isOverdue } from '../../utils/helpers';
-import { INQUIRY_STATUSES, FOLLOW_UP_TYPES, INTEREST_LEVELS } from '../../utils/constants';
+import {
+  INQUIRY_STATUSES, FOLLOW_UP_TYPES, INTEREST_LEVELS, QUOTA_TYPES,
+} from '../../utils/constants';
 import { isAdminOrAbove } from '../../utils/roleUtils';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -44,6 +46,7 @@ const HISTORY_FIELD_LABELS = {
   session_preference: 'Session Preference',
   assigned_staff_id: 'Assigned Staff',
   priority: 'Priority',
+  quota: 'Quota',
   status: 'Status',
   status_changed_at: 'Status Changed At',
   interest_level: 'Interest Level',
@@ -164,7 +167,6 @@ export default function InquiryDetail() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [followUpModal, setFollowUpModal] = useState(false);
-  const [statusModal, setStatusModal] = useState(false);
 
   useEffect(() => { loadInquiry(); }, [id]);
 
@@ -244,12 +246,6 @@ export default function InquiryDetail() {
         action={
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => setStatusModal(true)}
-              className="inline-flex items-center gap-1 rounded-lg bg-white border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Update Status
-            </button>
-            <button
               onClick={() => setFollowUpModal(true)}
               className="inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700"
             >
@@ -323,14 +319,7 @@ export default function InquiryDetail() {
         isOpen={followUpModal}
         onClose={() => setFollowUpModal(false)}
         inquiryId={inquiry.id}
-        onSuccess={loadInquiry}
-      />
-
-      {/* Status Modal */}
-      <StatusModal
-        isOpen={statusModal}
-        onClose={() => setStatusModal(false)}
-        inquiry={inquiry}
+        currentStatus={inquiry.status}
         onSuccess={loadInquiry}
       />
     </div>
@@ -339,6 +328,7 @@ export default function InquiryDetail() {
 
 function OverviewTab({ inquiry, historyLookups }) {
   const isCollegeInquiry = inquiry?.campus?.campus_type === 'college';
+  const quotaLabelMap = QUOTA_TYPES.reduce((acc, item) => ({ ...acc, [item.value]: item.label }), {});
   const createdAt = inquiry?.created_at || inquiry?.createdAt;
   const updatedAt = inquiry?.updated_at || inquiry?.updatedAt || createdAt;
   const createdByName = inquiry?.createdBy?.name || '-';
@@ -398,6 +388,7 @@ function OverviewTab({ inquiry, historyLookups }) {
           {isCollegeInquiry && inquiry.inquiry_form_taken !== null && inquiry.inquiry_form_taken !== undefined && (
             <InfoRow label="Form Taken" value={inquiry.inquiry_form_taken ? 'Taken' : 'Not Taken'} />
           )}
+          {isCollegeInquiry && inquiry.quota && <InfoRow label="Quota" value={quotaLabelMap[inquiry.quota] || inquiry.quota} />}
           {inquiry.session_preference && <InfoRow label="Session" value={inquiry.session_preference} />}
           <InfoRow label="Assigned To" value={inquiry.assignedStaff?.name || 'Unassigned'} />
           <InfoRow label="Entry Type" value={inquiry.is_manual_entry ? 'Manual Entry' : 'Regular Entry'} />
@@ -724,12 +715,27 @@ function ActivityTab({ inquiry, historyLookups }) {
   );
 }
 
-function FollowUpModal({ isOpen, onClose, inquiryId, onSuccess }) {
+function FollowUpModal({ isOpen, onClose, inquiryId, currentStatus, onSuccess }) {
   const [form, setForm] = useState({
-    type: 'outgoing_call', duration_minutes: '', notes: '',
+    type: 'outgoing_call', duration_minutes: '', follow_up_notes: '',
     interest_level: '', next_action: '', next_action_date: '',
+    new_status: currentStatus || '', status_notes: '',
   });
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setForm({
+      type: 'outgoing_call',
+      duration_minutes: '',
+      follow_up_notes: '',
+      interest_level: '',
+      next_action: '',
+      next_action_date: '',
+      new_status: currentStatus || '',
+      status_notes: '',
+    });
+  }, [isOpen, currentStatus]);
 
   function handleChange(e) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -739,13 +745,30 @@ function FollowUpModal({ isOpen, onClose, inquiryId, onSuccess }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const data = { ...form, inquiry_id: inquiryId };
+      const data = {
+        inquiry_id: inquiryId,
+        type: form.type,
+        duration_minutes: form.duration_minutes,
+        notes: form.follow_up_notes,
+        interest_level: form.interest_level,
+        next_action: form.next_action,
+        next_action_date: form.next_action_date,
+      };
       if (data.duration_minutes) data.duration_minutes = parseInt(data.duration_minutes);
       Object.keys(data).forEach(k => { if (data[k] === '') data[k] = null; });
       await api.post('/follow-ups', data);
+
+      const shouldUpdateStatus = Boolean(form.new_status)
+        && (form.new_status !== currentStatus || String(form.status_notes || '').trim().length > 0);
+      if (shouldUpdateStatus) {
+        await api.patch(`/inquiries/${inquiryId}/status`, {
+          status: form.new_status,
+          notes: form.status_notes || undefined,
+        });
+      }
+
       onSuccess();
       onClose();
-      setForm({ type: 'outgoing_call', duration_minutes: '', notes: '', interest_level: '', next_action: '', next_action_date: '' });
     } catch (err) {
       console.error(err);
     } finally {
@@ -771,8 +794,8 @@ function FollowUpModal({ isOpen, onClose, inquiryId, onSuccess }) {
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-          <textarea name="notes" value={form.notes} onChange={handleChange} rows={3} className={inputClass} placeholder="What was discussed..." />
+          <label className="block text-sm font-medium text-gray-700 mb-1">Follow-up Notes</label>
+          <textarea name="follow_up_notes" value={form.follow_up_notes} onChange={handleChange} rows={3} className={inputClass} placeholder="What was discussed..." />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Interest Level</label>
@@ -791,60 +814,30 @@ function FollowUpModal({ isOpen, onClose, inquiryId, onSuccess }) {
             <input name="next_action_date" type="date" value={form.next_action_date} onChange={handleChange} className={inputClass} />
           </div>
         </div>
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <p className="text-sm font-semibold text-gray-900">Update Status</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
+            <select name="new_status" value={form.new_status} onChange={handleChange} className={inputClass}>
+              {INQUIRY_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <textarea
+              name="status_notes"
+              value={form.status_notes}
+              onChange={handleChange}
+              rows={2}
+              className={inputClass}
+              placeholder="Optional status update notes"
+            />
+          </div>
+        </div>
         <div className="flex justify-end gap-3 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
           <button type="submit" disabled={loading} className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
             {loading ? 'Saving...' : 'Save Follow-up'}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function StatusModal({ isOpen, onClose, inquiry, onSuccess }) {
-  const [status, setStatus] = useState(inquiry?.status || '');
-  const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (inquiry) setStatus(inquiry.status);
-  }, [inquiry]);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await api.patch(`/inquiries/${inquiry.id}/status`, { status, notes: notes || undefined });
-      onSuccess();
-      onClose();
-      setNotes('');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const inputClass = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none';
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Update Status" size="sm">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">New Status</label>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
-            {INQUIRY_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} />
-        </div>
-        <div className="flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-          <button type="submit" disabled={loading} className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
-            {loading ? 'Updating...' : 'Update Status'}
           </button>
         </div>
       </form>

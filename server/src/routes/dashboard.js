@@ -45,6 +45,37 @@ function numberOrZero(value) {
   return Number.parseInt(value, 10) || 0;
 }
 
+function staffOwnedInquiryWhere(baseWhere, staffId) {
+  return {
+    ...baseWhere,
+    [Op.or]: [
+      { assigned_staff_id: staffId },
+      { assigned_staff_id: null, created_by: staffId },
+    ],
+  };
+}
+
+function staffCreatedOrAssignedInquiryWhere(baseWhere, staffId) {
+  return {
+    ...baseWhere,
+    [Op.or]: [
+      { assigned_staff_id: staffId },
+      { created_by: staffId },
+    ],
+  };
+}
+
+function normalizeAreaLabel(value) {
+  if (value === null || value === undefined) return null;
+  const compact = String(value).trim().replace(/\s+/g, ' ');
+  if (!compact) return null;
+  return compact
+    .toLowerCase()
+    .split(' ')
+    .map((word) => (word ? `${word[0].toUpperCase()}${word.slice(1)}` : word))
+    .join(' ');
+}
+
 function emptyDisciplineRow(id, name) {
   return {
     id,
@@ -84,6 +115,10 @@ router.get('/admission-stats', async (req, res) => {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const today = now.toISOString().split('T')[0];
+    const dailyWindowDays = 30;
+    const startOfDailyWindowDate = new Date(now);
+    startOfDailyWindowDate.setDate(startOfDailyWindowDate.getDate() - (dailyWindowDays - 1));
+    const startOfDailyWindow = startOfDailyWindowDate.toISOString().split('T')[0];
 
     // Total inquiries
     const totalInquiries = await Inquiry.count({ where });
@@ -110,6 +145,38 @@ router.get('/admission-stats', async (req, res) => {
       where: { ...thisMonthWhere, status: 'admitted' },
     });
     const conversionRate = thisMonth > 0 ? ((admittedThisMonth / thisMonth) * 100).toFixed(1) : 0;
+
+    const dailyInquiryRaw = await Inquiry.findAll({
+      where: {
+        ...where,
+        inquiry_date: { [Op.gte]: startOfDailyWindow, [Op.lte]: today },
+      },
+      attributes: ['inquiry_date', [sequelize.fn('COUNT', sequelize.col('Inquiry.id')), 'count']],
+      group: ['inquiry_date'],
+      order: [['inquiry_date', 'ASC']],
+      raw: true,
+    });
+    const dailyInquiryCountMap = new Map(
+      dailyInquiryRaw
+        .filter((row) => row?.inquiry_date)
+        .map((row) => [String(row.inquiry_date).slice(0, 10), numberOrZero(row.count)]),
+    );
+    const dailyInquiryData = [];
+    for (let i = 0; i < dailyWindowDays; i += 1) {
+      const day = new Date(startOfDailyWindowDate);
+      day.setDate(startOfDailyWindowDate.getDate() + i);
+      const dateStr = day.toISOString().split('T')[0];
+      dailyInquiryData.push({
+        date: dateStr,
+        day: day.toLocaleDateString('en', { weekday: 'short', day: 'numeric' }),
+        count: dailyInquiryCountMap.get(dateStr) || 0,
+      });
+    }
+    const last7DaysInquiries = dailyInquiryData
+      .slice(-7)
+      .reduce((sum, row) => sum + numberOrZero(row.count), 0);
+    const dailyTotal30Days = dailyInquiryData
+      .reduce((sum, row) => sum + numberOrZero(row.count), 0);
 
     // By source with campus-type breakdown (for source-level hover details in dashboard)
     const bySourceRaw = await Inquiry.findAll({
@@ -189,6 +256,9 @@ router.get('/admission-stats', async (req, res) => {
       thisMonth,
       todayCount,
       conversionRate: parseFloat(conversionRate),
+      last7DaysInquiries,
+      dailyTotal30Days,
+      dailyInquiryData,
       byStatus,
       bySource: bySourceDetailed.map(s => ({ name: s.name, count: s.count })),
       bySourceDetailed,
@@ -515,17 +585,20 @@ router.get('/staff-performance', authorize('super_admin', 'admin'), async (req, 
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
     const performance = await Promise.all(scopedStaff.map(async (s) => {
+      const reportWhere = staffCreatedOrAssignedInquiryWhere(inquiryWhere, s.id);
+      const ownedWhere = staffOwnedInquiryWhere(inquiryWhere, s.id);
+
       const totalInquiries = await Inquiry.count({
-        where: { ...inquiryWhere, assigned_staff_id: s.id },
+        where: reportWhere,
       });
 
       const admittedCount = await Inquiry.count({
-        where: { ...inquiryWhere, assigned_staff_id: s.id, status: 'admitted' },
+        where: { ...reportWhere, status: 'admitted' },
       });
 
       const followUpsThisMonth = await InquiryFollowUp.count({
         where: { staff_id: s.id, created_at: { [Op.gte]: startOfMonth } },
-        include: [inquiryIncludeForScope({ ...inquiryWhere, assigned_staff_id: s.id })],
+        include: [inquiryIncludeForScope(ownedWhere)],
         distinct: true,
       });
 
@@ -537,8 +610,16 @@ router.get('/staff-performance', authorize('super_admin', 'admin'), async (req, 
             [Op.lt]: new Date(new Date(today).getTime() + 24 * 60 * 60 * 1000),
           },
         },
-        include: [inquiryIncludeForScope({ ...inquiryWhere, assigned_staff_id: s.id })],
+        include: [inquiryIncludeForScope(ownedWhere)],
         distinct: true,
+      });
+
+      const createdUnassignedCount = await Inquiry.count({
+        where: {
+          ...inquiryWhere,
+          assigned_staff_id: null,
+          created_by: s.id,
+        },
       });
 
       return {
@@ -547,6 +628,7 @@ router.get('/staff-performance', authorize('super_admin', 'admin'), async (req, 
         role: s.role,
         totalInquiries,
         admittedCount,
+        createdUnassignedCount,
         conversionRate: totalInquiries > 0 ? ((admittedCount / totalInquiries) * 100).toFixed(1) : 0,
         followUpsThisMonth,
         followUpsToday,
@@ -981,19 +1063,21 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       : allStaff;
 
     const staffControl = await Promise.all(staff.map(async (s) => {
+      const ownedWhere = staffOwnedInquiryWhere(inquiryWhere, s.id);
+      const ownedActiveWhere = staffOwnedInquiryWhere(baseWhere, s.id);
+
       const assignedTotal = await Inquiry.count({
-        where: { ...inquiryWhere, assigned_staff_id: s.id },
+        where: ownedWhere,
       });
       const assignedActive = await Inquiry.count({
-        where: { ...baseWhere, assigned_staff_id: s.id },
+        where: ownedActiveWhere,
       });
       const assignedAdmitted = await Inquiry.count({
-        where: { ...inquiryWhere, assigned_staff_id: s.id, status: 'admitted' },
+        where: { ...ownedWhere, status: 'admitted' },
       });
       const assignedOverdue = await Inquiry.count({
         where: {
-          ...baseWhere,
-          assigned_staff_id: s.id,
+          ...ownedActiveWhere,
           next_follow_up_date: { [Op.lt]: today, [Op.ne]: null },
         },
       });
@@ -1002,8 +1086,16 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
           staff_id: s.id,
           created_at: { [Op.gte]: startOfMonth },
         },
-        include: [inquiryIncludeForScope({ ...inquiryWhere, assigned_staff_id: s.id })],
+        include: [inquiryIncludeForScope(ownedWhere)],
         distinct: true,
+      });
+
+      const createdUnassignedCount = await Inquiry.count({
+        where: {
+          ...inquiryWhere,
+          assigned_staff_id: null,
+          created_by: s.id,
+        },
       });
 
       const conversionRate = assignedTotal > 0 ? ((assignedAdmitted / assignedTotal) * 100) : 0;
@@ -1018,6 +1110,7 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
         admittedCount: assignedAdmitted,
         overdueCount: assignedOverdue,
         followUpsThisMonth,
+        createdUnassignedCount,
         conversionRate: Number.parseFloat(conversionRate.toFixed(1)),
         activityScore,
       };
@@ -1028,9 +1121,21 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       attributes: ['area', [sequelize.fn('COUNT', sequelize.col('Inquiry.id')), 'count']],
       group: ['area'],
       order: [[sequelize.literal('count'), 'DESC']],
-      limit: 6,
       raw: true,
     });
+    const topAreas = Array.from(
+      topAreasRaw.reduce((acc, item) => {
+        const normalized = normalizeAreaLabel(item.area);
+        if (!normalized) return acc;
+        const key = normalized.toLowerCase();
+        const existing = acc.get(key) || { name: normalized, count: 0 };
+        existing.count += numberOrZero(item.count);
+        acc.set(key, existing);
+        return acc;
+      }, new Map()).values()
+    )
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 6);
 
     const topSourcesRaw = await Inquiry.findAll({
       where: inquiryWhere,
@@ -1118,7 +1223,7 @@ router.get('/control-analytics', authorize('super_admin', 'admin'), async (req, 
       campusBreakdown,
       classPerformance,
       staffControl: staffControl.sort((a, b) => b.activityScore - a.activityScore),
-      topAreas: topAreasRaw.map(item => ({ name: item.area, count: numberOrZero(item.count) })),
+      topAreas,
       topSources: topSourcesRaw.map(item => ({ name: item['source.name'] || 'Unknown', count: numberOrZero(item.count) })),
     });
   } catch (error) {

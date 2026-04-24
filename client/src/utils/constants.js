@@ -21,6 +21,11 @@ export const PRIORITIES = [
   { value: 'urgent', label: 'Urgent', color: 'red' },
 ];
 
+export const QUOTA_TYPES = [
+  { value: 'private', label: 'Private' },
+  { value: 'pwwf', label: 'PWWF' },
+];
+
 export const INTEREST_LEVELS = [
   { value: 'very_interested', label: 'Very Interested', color: 'green' },
   { value: 'interested', label: 'Interested', color: 'blue' },

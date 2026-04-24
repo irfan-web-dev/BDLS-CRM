@@ -3,7 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin, isAdminOrAbove } from '../../utils/roleUtils';
-import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, LAHORE_AREAS } from '../../utils/constants';
+import {
+  RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, QUOTA_TYPES, LAHORE_AREAS,
+} from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 
@@ -45,7 +47,7 @@ export default function InquiryEdit() {
     previous_institute: '', previous_marks_obtained: '', previous_total_marks: '', previous_major_subjects: '',
     special_needs: '', inquiry_date: '', source_id: '', referral_parent_name: '',
     campus_id: user?.campus_id || '', package_name: '', package_amount: '', session_preference: '', assigned_staff_id: '',
-    inquiry_form_taken: '', priority: 'normal', notes: '', tag_ids: [],
+    inquiry_form_taken: '', priority: 'normal', quota: '', notes: '', tag_ids: [],
   });
 
   useEffect(() => {
@@ -126,7 +128,7 @@ export default function InquiryEdit() {
         package_name: inq.package_name || '', package_amount: inq.package_amount || '',
         session_preference: inq.session_preference || '', assigned_staff_id: inq.assigned_staff_id || '',
         inquiry_form_taken: inq.inquiry_form_taken === true ? 'true' : (inq.inquiry_form_taken === false ? 'false' : ''),
-        priority: inq.priority || 'normal', notes: inq.notes || '',
+        priority: inq.priority || 'normal', quota: inq.quota || '', notes: inq.notes || '',
         tag_ids: inq.tags?.map(t => t.id) || [],
       });
 
@@ -475,6 +477,17 @@ export default function InquiryEdit() {
             <div><label className={labelClass}>Session</label><select name="session_preference" value={form.session_preference} onChange={handleChange} className={inputClass}><option value="">Select</option>{SESSION_PREFERENCES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
             {isAdminOrAbove(user) && <div><label className={labelClass}>Assigned Staff</label><select name="assigned_staff_id" value={form.assigned_staff_id} onChange={handleChange} className={inputClass}><option value="">Select</option>{staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>}
             {!isCollegeFlow && <div><label className={labelClass}>Priority</label><select name="priority" value={form.priority} onChange={handleChange} className={inputClass}>{PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}</select></div>}
+            {isCollegeFlow && (
+              <div>
+                <label className={labelClass}>Quota</label>
+                <select name="quota" value={form.quota} onChange={handleChange} className={inputClass}>
+                  <option value="">Select quota</option>
+                  {QUOTA_TYPES.map((quotaType) => (
+                    <option key={quotaType.value} value={quotaType.value}>{quotaType.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 

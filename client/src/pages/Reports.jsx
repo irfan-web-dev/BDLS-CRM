@@ -9,6 +9,9 @@ import PageHeader from '../components/ui/PageHeader';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import CampusTypeTabs from '../components/ui/CampusTypeTabs';
 
+const VALID_CAMPUS_TYPES = ['school', 'college'];
+const VALID_REPORT_TABS = ['overall', 'college_complete', 'inquiry', 'communication', 'staff'];
+
 function safeList(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -34,10 +37,24 @@ export default function Reports() {
   const [staffPerformance, setStaffPerformance] = useState(null);
   const [completeReport, setCompleteReport] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('inquiry');
-  const [campusType, setCampusType] = useState(user?.campus?.campus_type || 'school');
+  const [activeTab, setActiveTab] = useState(() => {
+    const tabParam = new URLSearchParams(window.location.search).get('report_tab');
+    return VALID_REPORT_TABS.includes(tabParam) ? tabParam : 'inquiry';
+  });
+  const [campusType, setCampusType] = useState(() => {
+    const campusParam = new URLSearchParams(window.location.search).get('campus_type');
+    if (VALID_CAMPUS_TYPES.includes(campusParam)) return campusParam;
+    return user?.campus?.campus_type || 'school';
+  });
 
   useEffect(() => { loadAll(); }, [campusType]);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!isSuperAdmin(user)) {
+      setCampusType(user?.campus?.campus_type || 'school');
+    }
+  }, [user]);
 
   async function loadAll() {
     setLoading(true);
@@ -70,6 +87,19 @@ export default function Reports() {
     }
   }, [isCollegeScope, activeTab]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('report_tab', activeTab);
+    if (isSuperAdmin(user)) {
+      params.set('campus_type', campusType);
+    } else {
+      params.delete('campus_type');
+    }
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
+  }, [activeTab, campusType, user]);
+
   function downloadInquiryReport() {
     if (!admissionStats) return;
 
@@ -92,6 +122,10 @@ export default function Reports() {
       [],
       ['Source', 'Count'],
       ...safeList(admissionStats.bySource).map(s => [s.name, s.count]),
+      [],
+      ['Daily Inquiries (Last 30 Days)', ''],
+      ['Date', 'Count'],
+      ...safeList(admissionStats.dailyInquiryData).map((row) => [row.date, row.count]),
     ];
     downloadCSV(rows, `inquiry-report-${scopeLabel}`);
   }
@@ -273,6 +307,8 @@ export default function Reports() {
         ['This Month', admissionStats.thisMonth],
         ['Today', admissionStats.todayCount],
         ['Conversion Rate (This Month)', `${admissionStats.conversionRate}%`],
+        ['Last 7 Days Inquiries', admissionStats.last7DaysInquiries ?? 0],
+        ['Last 30 Days Inquiries', admissionStats.dailyTotal30Days ?? 0],
         [],
         ['Status', 'Count'],
         ...safeList(admissionStats.byStatus).map((s) => {
@@ -282,6 +318,10 @@ export default function Reports() {
         [],
         ['Source', 'Count'],
         ...safeList(admissionStats.bySource).map(s => [s.name, s.count]),
+        [],
+        ['Daily Inquiries (Last 30 Days)', ''],
+        ['Date', 'Count'],
+        ...safeList(admissionStats.dailyInquiryData).map((row) => [row.date, row.count]),
       );
     } else {
       rows.push(['Status', 'Data unavailable']);
@@ -373,6 +413,7 @@ export default function Reports() {
       conversionRate: parseFloat(s.conversionRate) || 0,
     }))
     .sort((a, b) => b.totalInquiries - a.totalInquiries);
+  const inquiryDailyTrend = safeList(admissionStats?.dailyInquiryData);
 
   return (
     <div>
@@ -417,7 +458,7 @@ export default function Reports() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Total Inquiries</p>
               <p className="text-2xl font-bold text-gray-900">{admissionStats?.totalInquiries ?? 0}</p>
@@ -425,6 +466,10 @@ export default function Reports() {
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">This Month</p>
               <p className="text-2xl font-bold text-blue-600">{admissionStats?.thisMonth ?? 0}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs text-gray-500">Last 7 Days</p>
+              <p className="text-2xl font-bold text-indigo-600">{admissionStats?.last7DaysInquiries ?? 0}</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Conversion Rate (This Month)</p>
@@ -441,6 +486,10 @@ export default function Reports() {
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Staff Records</p>
               <p className="text-2xl font-bold text-purple-600">{safeList(staffPerformance).length}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs text-gray-500">Last 30 Days</p>
+              <p className="text-2xl font-bold text-cyan-600">{admissionStats?.dailyTotal30Days ?? 0}</p>
             </div>
           </div>
 
@@ -562,7 +611,7 @@ export default function Reports() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl shadow-sm border p-5">
               <h4 className="text-sm font-semibold text-gray-900 mb-4">Inquiry Status Distribution</h4>
               {statusData.length > 0 ? (
@@ -577,6 +626,23 @@ export default function Reports() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-[280px] flex items-center justify-center text-sm text-gray-400">No inquiry status data available.</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border p-5">
+              <h4 className="text-sm font-semibold text-gray-900 mb-4">Inquiry Trend (30 Days)</h4>
+              {inquiryDailyTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={inquiryDailyTrend}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-[280px] flex items-center justify-center text-sm text-gray-400">No inquiry trend data available.</div>
               )}
             </div>
 
@@ -807,7 +873,7 @@ export default function Reports() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Total Inquiries</p>
               <p className="text-2xl font-bold text-gray-900">{admissionStats.totalInquiries}</p>
@@ -823,6 +889,10 @@ export default function Reports() {
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <p className="text-xs text-gray-500">Conversion Rate (This Month)</p>
               <p className="text-2xl font-bold text-green-600">{admissionStats.conversionRate}%</p>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border p-4">
+              <p className="text-xs text-gray-500">Last 7 Days</p>
+              <p className="text-2xl font-bold text-indigo-600">{admissionStats.last7DaysInquiries || 0}</p>
             </div>
           </div>
 
@@ -856,6 +926,23 @@ export default function Reports() {
                 })}
               </div>
             </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-4">Daily Inquiries (Last 30 Days)</h4>
+            {inquiryDailyTrend.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={inquiryDailyTrend}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[300px] flex items-center justify-center text-sm text-gray-400">No daily inquiry data available.</div>
+            )}
           </div>
         </div>
       )}

@@ -15,6 +15,7 @@ import {
 const router = Router();
 const VALID_CAMPUS_TYPES = ['school', 'college'];
 const STAFF_ROLE_SCOPE = ['super_admin', 'admin', 'staff'];
+const ALLOWED_QUOTA_VALUES = new Set(['private', 'pwwf']);
 
 router.use(authenticate);
 router.use(scopeToCampus);
@@ -59,6 +60,7 @@ const INQUIRY_AUDIT_FIELDS = [
   'session_preference',
   'assigned_staff_id',
   'priority',
+  'quota',
   'status',
   'status_changed_at',
   'interest_level',
@@ -108,6 +110,25 @@ function normalizePhoneValue(value) {
   if (value === null || value === undefined) return null;
   const digits = String(value).replace(/\D/g, '');
   return digits || null;
+}
+
+function normalizeAreaValue(value) {
+  if (value === null || value === undefined) return null;
+  const compact = String(value).trim().replace(/\s+/g, ' ');
+  if (!compact) return null;
+  return compact
+    .toLowerCase()
+    .split(' ')
+    .map((word) => (word ? `${word[0].toUpperCase()}${word.slice(1)}` : word))
+    .join(' ');
+}
+
+function normalizeQuotaValue(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return null;
+  if (!ALLOWED_QUOTA_VALUES.has(normalized)) return null;
+  return normalized;
 }
 
 function isValidPhoneNumber(value) {
@@ -283,8 +304,9 @@ router.get('/', async (req, res) => {
   try {
     const {
       status, campus_id, class_id, source_id, assigned_staff_id,
-      priority, date_from, date_to, search, tag_id,
+      priority, quota, date_from, date_to, search, tag_id,
       gender, area, previous_institute, followup_today, followup_filter,
+      inquiry_timeframe,
       is_manual_entry, is_sibling: is_sibling_filter,
       page = 1, limit = 20, sort_by = 'created_at', sort_order = 'DESC',
     } = req.query;
@@ -299,6 +321,17 @@ router.get('/', async (req, res) => {
     if (source_id) where.source_id = String(source_id).includes(',') ? { [Op.in]: source_id.split(',') } : source_id;
     if (assigned_staff_id) where.assigned_staff_id = String(assigned_staff_id).includes(',') ? { [Op.in]: assigned_staff_id.split(',') } : assigned_staff_id;
     if (priority) where.priority = priority.includes(',') ? { [Op.in]: priority.split(',') } : priority;
+    if (quota) {
+      const quotaValues = String(quota)
+        .split(',')
+        .map((item) => normalizeQuotaValue(item))
+        .filter(Boolean);
+      if (quotaValues.length === 1) {
+        where.quota = quotaValues[0];
+      } else if (quotaValues.length > 1) {
+        where.quota = { [Op.in]: quotaValues };
+      }
+    }
     if (is_manual_entry !== undefined && is_manual_entry !== null && is_manual_entry !== '') {
       const manualValues = String(is_manual_entry)
         .split(',')
@@ -321,7 +354,29 @@ router.get('/', async (req, res) => {
       }
     }
     if (gender) where.gender = gender.includes(',') ? { [Op.in]: gender.split(',') } : gender;
-    if (area) where.area = area.includes(',') ? { [Op.in]: area.split(',') } : area;
+    if (area) {
+      const areaValues = String(area)
+        .split(',')
+        .map(item => String(item || '').trim().toLowerCase())
+        .filter(Boolean);
+      if (areaValues.length === 1) {
+        where[Op.and] = [
+          ...(where[Op.and] || []),
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('Inquiry.area'))),
+            areaValues[0],
+          ),
+        ];
+      } else if (areaValues.length > 1) {
+        where[Op.and] = [
+          ...(where[Op.and] || []),
+          sequelize.where(
+            sequelize.fn('LOWER', sequelize.fn('TRIM', sequelize.col('Inquiry.area'))),
+            { [Op.in]: areaValues },
+          ),
+        ];
+      }
+    }
     if (previous_institute) {
       where.previous_institute = previous_institute.includes(',')
         ? { [Op.in]: previous_institute.split(',') }
@@ -356,10 +411,36 @@ router.get('/', async (req, res) => {
       where.status = { [Op.in]: ACTIVE_INQUIRY_STATUSES };
     }
 
-    if (date_from || date_to) {
+    let timeframeStart = null;
+    if (inquiry_timeframe) {
+      const selections = String(inquiry_timeframe)
+        .split(',')
+        .map(item => item.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (selections.includes('monthly')) {
+        timeframeStart = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString().split('T')[0];
+      } else if (selections.includes('weekly')) {
+        const weekStartDate = new Date(todayDate);
+        weekStartDate.setDate(weekStartDate.getDate() - 6);
+        timeframeStart = weekStartDate.toISOString().split('T')[0];
+      } else if (selections.includes('today')) {
+        timeframeStart = today;
+      }
+    }
+
+    if (date_from || date_to || timeframeStart) {
       where.inquiry_date = {};
-      if (date_from) where.inquiry_date[Op.gte] = date_from;
-      if (date_to) where.inquiry_date[Op.lte] = date_to;
+
+      const lowerBounds = [date_from, timeframeStart].filter(Boolean).sort();
+      const upperBounds = [date_to, timeframeStart ? today : null].filter(Boolean).sort();
+
+      if (lowerBounds.length) {
+        where.inquiry_date[Op.gte] = lowerBounds[lowerBounds.length - 1];
+      }
+      if (upperBounds.length) {
+        where.inquiry_date[Op.lte] = upperBounds[0];
+      }
     }
 
     if (search) {
@@ -428,7 +509,14 @@ router.get('/filter-options', async (req, res) => {
     });
 
     const clean = (value) => (typeof value === 'string' ? value.trim() : '');
-    const areas = [...new Set(rows.map(r => clean(r.area)).filter(Boolean))]
+    const normalizedAreaMap = new Map();
+    rows.forEach((row) => {
+      const normalized = normalizeAreaValue(row.area);
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (!normalizedAreaMap.has(key)) normalizedAreaMap.set(key, normalized);
+    });
+    const areas = [...normalizedAreaMap.values()]
       .sort((a, b) => a.localeCompare(b));
     const previous_institutes = [...new Set(rows.map(r => clean(r.previous_institute)).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b));
@@ -762,6 +850,7 @@ router.post('/', async (req, res) => {
       special_needs, inquiry_date, source_id, referral_parent_name, package_name, package_amount, inquiry_form_taken,
       campus_id, session_preference, assigned_staff_id, priority, interest_level, next_follow_up_date, notes, tag_ids,
       is_sibling, sibling_of_inquiry_id, is_manual_entry,
+      quota,
     } = req.body;
 
     const assignedCampus = req.user.role === 'admin' ? req.user.campus_id : (campus_id || req.user.campus_id);
@@ -831,6 +920,8 @@ router.post('/', async (req, res) => {
         return res.status(400).json({ error: validation.error });
       }
       normalizedAssignedStaffId = validation.id;
+    } else if (STAFF_ROLE_SCOPE.includes(req.user.role)) {
+      normalizedAssignedStaffId = req.user.id;
     }
 
     const siblingLink = await resolveSiblingLink(req, {
@@ -842,13 +933,18 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: siblingLink.error });
     }
 
+    const normalizedQuota = isCollegeFlow ? normalizeQuotaValue(quota) : null;
+    if (isCollegeFlow && quota !== undefined && quota !== null && String(quota).trim() !== '' && !normalizedQuota) {
+      return res.status(400).json({ error: 'Quota must be Private or PWWF' });
+    }
+
     let inquiryPayload = {
       parent_name: normalizedParentName,
       relationship: normalizedRelationship,
       parent_phone: normalizedParentPhone,
       parent_whatsapp: normalizedParentWhatsapp,
       parent_email,
-      city, area, student_name, date_of_birth, gender, student_phone: normalizedStudentPhone, class_applying_id,
+      city, area: normalizeAreaValue(area), student_name, date_of_birth, gender, student_phone: normalizedStudentPhone, class_applying_id,
       current_school, previous_institute, previous_marks_obtained, previous_total_marks, previous_major_subjects,
       special_needs,
       inquiry_date: inquiry_date || new Date().toISOString().split('T')[0],
@@ -858,6 +954,7 @@ router.post('/', async (req, res) => {
       session_preference,
       assigned_staff_id: normalizedAssignedStaffId,
       priority,
+      quota: normalizedQuota,
       interest_level,
       next_follow_up_date: next_follow_up_date || null,
       is_sibling: siblingLink.is_sibling,
@@ -980,6 +1077,9 @@ router.put('/:id', async (req, res) => {
     if (updateData.previous_marks_obtained !== undefined && updateData.previous_marks_obtained !== null) {
       updateData.previous_marks_obtained = Number.parseInt(updateData.previous_marks_obtained, 10);
     }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'area')) {
+      updateData.area = normalizeAreaValue(updateData.area);
+    }
     if (updateData.previous_total_marks !== undefined && updateData.previous_total_marks !== null) {
       updateData.previous_total_marks = Number.parseInt(updateData.previous_total_marks, 10);
     }
@@ -1034,6 +1134,22 @@ router.put('/:id', async (req, res) => {
     }
     if (Object.prototype.hasOwnProperty.call(updateData, 'inquiry_form_taken')) {
       updateData.inquiry_form_taken = parseNullableBoolean(updateData.inquiry_form_taken);
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'quota')) {
+      if (!isCollegeFlow) {
+        updateData.quota = null;
+      } else {
+        const normalizedQuota = normalizeQuotaValue(updateData.quota);
+        if (
+          updateData.quota !== undefined
+          && updateData.quota !== null
+          && String(updateData.quota).trim() !== ''
+          && !normalizedQuota
+        ) {
+          return res.status(400).json({ error: 'Quota must be Private or PWWF' });
+        }
+        updateData.quota = normalizedQuota;
+      }
     }
     if (Object.prototype.hasOwnProperty.call(updateData, 'is_manual_entry')) {
       updateData.is_manual_entry = parseNullableBoolean(updateData.is_manual_entry) === true;

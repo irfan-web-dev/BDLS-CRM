@@ -126,6 +126,13 @@ const Inquiry = sequelize.define('Inquiry', {
     type: DataTypes.ENUM('normal', 'high', 'urgent'),
     defaultValue: 'normal',
   },
+  quota: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    validate: {
+      isIn: [['private', 'pwwf']],
+    },
+  },
 
   // Status Pipeline
   status: {

@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isSuperAdmin, isAdminOrAbove } from '../../utils/roleUtils';
-import { RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, LAHORE_AREAS } from '../../utils/constants';
+import {
+  RELATIONSHIPS, GENDERS, SESSION_PREFERENCES, PRIORITIES, QUOTA_TYPES, LAHORE_AREAS,
+} from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 import CampusTypeTabs from '../../components/ui/CampusTypeTabs';
 
-function createInquiryFormState(today, campusId = '', manualMode = false) {
+function createInquiryFormState(today, campusId = '', manualMode = false, assignedStaffId = '') {
   return {
     parent_name: '', relationship: manualMode ? '' : 'father', parent_phone: '',
     parent_whatsapp: '', parent_email: '', city: manualMode ? '' : 'Lahore', area: '',
@@ -18,8 +20,37 @@ function createInquiryFormState(today, campusId = '', manualMode = false) {
     inquiry_date: manualMode ? '' : today,
     source_id: '', referral_parent_name: '', campus_id: campusId || '',
     package_name: '', package_amount: '', inquiry_form_taken: '',
-    session_preference: '', assigned_staff_id: '', priority: manualMode ? '' : 'normal',
+    session_preference: '', assigned_staff_id: assignedStaffId || '', priority: manualMode ? '' : 'normal',
+    quota: '',
     notes: '', tag_ids: [],
+  };
+}
+
+function createSiblingRowState(seed = {}) {
+  return {
+    student_name: '',
+    date_of_birth: '',
+    gender: '',
+    student_phone: '',
+    class_applying_id: '',
+    current_school: '',
+    previous_institute: '',
+    previous_marks_obtained: '',
+    previous_total_marks: '',
+    previous_major_subjects: '',
+    special_needs: '',
+    inquiry_date: '',
+    source_id: '',
+    referral_parent_name: '',
+    session_preference: '',
+    assigned_staff_id: '',
+    priority: '',
+    quota: '',
+    package_name: '',
+    package_amount: '',
+    inquiry_form_taken: '',
+    notes: '',
+    ...seed,
   };
 }
 
@@ -50,6 +81,10 @@ function isValidPhoneInput(value) {
 
 function getInquiryDraftStorageKey(userId, manualMode = false) {
   return `${INQUIRY_DRAFT_STORAGE_PREFIX}:${manualMode ? 'manual' : 'default'}:${String(userId || 'guest')}`;
+}
+
+function isSiblingRowEmpty(row = {}) {
+  return Object.values(row).every((value) => String(value ?? '').trim() === '');
 }
 
 export default function InquiryCreate({ manualMode = false }) {
@@ -105,8 +140,9 @@ export default function InquiryCreate({ manualMode = false }) {
   }
 
   const today = new Date().toISOString().split('T')[0];
+  const defaultAssignedStaffId = user?.id ? String(user.id) : '';
 
-  const [form, setForm] = useState(() => createInquiryFormState(today, user?.campus_id || '', manualMode));
+  const [form, setForm] = useState(() => createInquiryFormState(today, user?.campus_id || '', manualMode, defaultAssignedStaffId));
   const [siblingEnabled, setSiblingEnabled] = useState(false);
   const [selectedSibling, setSelectedSibling] = useState(null);
   const [siblingQuery, setSiblingQuery] = useState('');
@@ -143,6 +179,13 @@ export default function InquiryCreate({ manualMode = false }) {
       setSiblingEnabled(Boolean(parsed?.siblingEnabled));
       setSelectedSibling(parsed?.selectedSibling || null);
       setSiblingQuery(typeof parsed?.siblingQuery === 'string' ? parsed.siblingQuery : '');
+      if (Array.isArray(parsed?.siblingRows)) {
+        setSiblingRows(parsed.siblingRows.map((row) => ({
+          ...createSiblingRowState(),
+          ...row,
+          student_phone: normalizePhoneInput(row?.student_phone || ''),
+        })));
+      }
       if (typeof parsed?.superAdminCampusType === 'string') {
         setSuperAdminCampusType(parsed.superAdminCampusType);
       }
@@ -188,6 +231,7 @@ export default function InquiryCreate({ manualMode = false }) {
           siblingEnabled,
           selectedSibling,
           siblingQuery,
+          siblingRows,
           superAdminCampusType,
           areaSearch,
         }),
@@ -201,6 +245,7 @@ export default function InquiryCreate({ manualMode = false }) {
     siblingEnabled,
     selectedSibling,
     siblingQuery,
+    siblingRows,
     superAdminCampusType,
     areaSearch,
     manualMode,
@@ -213,6 +258,21 @@ export default function InquiryCreate({ manualMode = false }) {
   useEffect(() => {
     loadScopedOptions();
   }, [form.campus_id, user?.role, campuses]);
+
+  useEffect(() => {
+    if (!isAdminOrAbove(user)) return;
+    if (!Array.isArray(staff) || staff.length === 0) return;
+    if (primarySharedLocked) return;
+
+    const currentAssignedExists = staff.some(s => String(s.id) === String(form.assigned_staff_id));
+    if (currentAssignedExists) return;
+
+    const selfStaff = staff.find(s => String(s.id) === String(user?.id));
+    const fallback = selfStaff || staff[0];
+    if (!fallback) return;
+
+    setForm(prev => ({ ...prev, assigned_staff_id: String(fallback.id) }));
+  }, [staff, user, form.assigned_staff_id, primarySharedLocked]);
 
   useEffect(() => {
     if (form.class_applying_id && !classes.some(c => String(c.id) === String(form.class_applying_id))) {
@@ -228,6 +288,13 @@ export default function InquiryCreate({ manualMode = false }) {
       setSuperAdminCampusType(selectedCampusForType.campus_type);
     }
   }, [campuses, form.campus_id, superAdminCampusType, user]);
+
+  useEffect(() => {
+    if (!isAdminOrAbove(user)) return;
+    if (!form.assigned_staff_id && defaultAssignedStaffId) {
+      setForm(prev => ({ ...prev, assigned_staff_id: defaultAssignedStaffId }));
+    }
+  }, [defaultAssignedStaffId, form.assigned_staff_id, user]);
 
   useEffect(() => {
     if (!isSuperAdmin(user)) return;
@@ -415,7 +482,7 @@ export default function InquiryCreate({ manualMode = false }) {
       campus_id: '',
       class_applying_id: '',
       source_id: '',
-      assigned_staff_id: '',
+      assigned_staff_id: defaultAssignedStaffId,
       inquiry_form_taken: '',
     }));
     setClasses([]);
@@ -474,22 +541,6 @@ export default function InquiryCreate({ manualMode = false }) {
     return data;
   }
 
-  function buildNextSiblingFormState(sharedSeed = null) {
-    const normalizedCampusId = isSuperAdmin(user) ? (form.campus_id || '') : (user?.campus_id || '');
-    const next = createInquiryFormState(today, normalizedCampusId, manualMode);
-    SIBLING_SHARED_FIELDS.forEach((key) => {
-      const seedValue = sharedSeed?.[key];
-      let value = seedValue !== null && seedValue !== undefined && seedValue !== '' ? seedValue : (form[key] ?? '');
-      if (['source_id', 'assigned_staff_id'].includes(key) && value !== null && value !== undefined && value !== '') {
-        value = String(value);
-      }
-      next[key] = value;
-    });
-    next.campus_id = normalizedCampusId;
-    next.inquiry_date = form.inquiry_date || today;
-    return next;
-  }
-
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
@@ -500,13 +551,6 @@ export default function InquiryCreate({ manualMode = false }) {
     try {
       if (isSuperAdminWithoutCampus) {
         throw new Error('Please select campus first');
-      }
-
-      // If sibling mode and form is empty but rows exist, use first row as primary
-      if (siblingEnabled && siblingRows.length > 0 && !form.student_name) {
-        const firstRow = siblingRows[0];
-        Object.assign(form, firstRow);
-        setSiblingRows(prev => prev.slice(1));
       }
 
       if (!form.student_name || !form.class_applying_id) {
@@ -531,6 +575,22 @@ export default function InquiryCreate({ manualMode = false }) {
         throw new Error('WhatsApp number must be exactly 11 digits');
       }
 
+      const filledSiblingRows = (siblingEnabled ? siblingRows : [])
+        .filter((row) => !isSiblingRowEmpty(row));
+
+      for (let i = 0; i < filledSiblingRows.length; i += 1) {
+        const row = filledSiblingRows[i];
+        if (!String(row.student_name || '').trim() || !String(row.class_applying_id || '').trim()) {
+          throw new Error(`Please fill sibling ${i + 1} name and class/discipline`);
+        }
+        if (row.inquiry_date && row.inquiry_date > today) {
+          throw new Error(`Sibling ${i + 1} inquiry date cannot be in the future`);
+        }
+        if (row.student_phone && !isValidPhoneInput(row.student_phone)) {
+          throw new Error(`Sibling ${i + 1} phone must be exactly 11 digits`);
+        }
+      }
+
       const selectedSiblingId = selectedSibling?.id || null;
       const shouldLinkAsSibling = !manualMode && siblingEnabled && Boolean(selectedSiblingId);
       const primaryPayload = buildPayload(form, {
@@ -544,12 +604,14 @@ export default function InquiryCreate({ manualMode = false }) {
       const redirectId = createdInquiry?.id;
 
       // Create additional sibling inquiries if any
-      if (!manualMode && siblingEnabled && siblingRows.length > 0) {
+      if (!manualMode && siblingEnabled && filledSiblingRows.length > 0) {
         const siblingReferenceId = createdInquiry.id;
         let siblingCount = 0;
-        for (const row of siblingRows) {
-          if (!row.student_name || !row.class_applying_id) continue;
-          const siblingForm = { ...form, ...row };
+        for (const row of filledSiblingRows) {
+          const siblingOverrides = Object.fromEntries(
+            Object.entries(row).filter(([, value]) => value !== '' && value !== null && value !== undefined),
+          );
+          const siblingForm = { ...form, ...siblingOverrides };
           const siblingPayload = buildPayload(siblingForm, {
             linkAsSibling: true,
             siblingReferenceId,
@@ -594,21 +656,27 @@ export default function InquiryCreate({ manualMode = false }) {
         />
         <div>
           <label className={labelClass}>Campus *</label>
-          <select
-            name="campus_id"
-            value={form.campus_id}
-            onChange={handleChange}
-            required
-            disabled={isSingleCampus || superAdminCampusesByType.length === 0}
-            className={inputClass}
-          >
-            <option value="">
-              {superAdminCampusesByType.length === 0
-                ? `No ${superAdminCampusType} campus available`
-                : `Select ${superAdminCampusType} campus`}
-            </option>
-            {superAdminCampusesByType.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          {isSingleCampus && superAdminCampusesByType.length === 1 ? (
+            <div className={`${inputClass} bg-gray-50 text-gray-700`}>
+              {superAdminCampusesByType[0].name}
+            </div>
+          ) : (
+            <select
+              name="campus_id"
+              value={form.campus_id}
+              onChange={handleChange}
+              required
+              disabled={superAdminCampusesByType.length === 0}
+              className={inputClass}
+            >
+              <option value="">
+                {superAdminCampusesByType.length === 0
+                  ? `No ${superAdminCampusType} campus available`
+                  : `Select ${superAdminCampusType} campus`}
+              </option>
+              {superAdminCampusesByType.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
         </div>
         {superAdminCampusesByType.length === 0 && (
           <p className="mt-2 text-xs text-amber-700">
@@ -620,7 +688,26 @@ export default function InquiryCreate({ manualMode = false }) {
   }
 
   function addSiblingRow() {
-    setSiblingRows(prev => [...prev, { student_name: '', class_applying_id: '', date_of_birth: '', gender: '', student_phone: '', current_school: '', special_needs: '' }]);
+    setSiblingRows(prev => [...prev, createSiblingRowState({
+      class_applying_id: form.class_applying_id || '',
+      gender: form.gender || '',
+      current_school: form.current_school || '',
+      previous_institute: form.previous_institute || '',
+      previous_marks_obtained: form.previous_marks_obtained || '',
+      previous_total_marks: form.previous_total_marks || '',
+      previous_major_subjects: form.previous_major_subjects || '',
+      inquiry_date: form.inquiry_date || today,
+      source_id: form.source_id || '',
+      referral_parent_name: form.referral_parent_name || '',
+      session_preference: form.session_preference || '',
+      assigned_staff_id: form.assigned_staff_id || '',
+      priority: form.priority || '',
+      quota: form.quota || '',
+      package_name: form.package_name || '',
+      package_amount: form.package_amount || '',
+      inquiry_form_taken: form.inquiry_form_taken || '',
+      notes: form.notes || '',
+    })]);
   }
 
   function updateSiblingRow(index, field, value) {
@@ -645,6 +732,8 @@ export default function InquiryCreate({ manualMode = false }) {
               if (!e.target.checked) {
                 setSelectedSibling(null);
                 setSiblingRows([]);
+              } else if (siblingRows.length === 0) {
+                setSiblingRows([createSiblingRowState()]);
               }
             }}
             className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
@@ -702,114 +791,54 @@ export default function InquiryCreate({ manualMode = false }) {
     );
   }
 
-  // Multi-tag input for sibling mode
-  function renderTagInput(fieldName, label, fieldValue, tags, { type = 'text', options, placeholder, required, isSelect } = {}) {
-    if (!siblingEnabled) {
-      if (isSelect) {
-        return (
-          <div>
-            <label className={labelClass}>{label}</label>
-            <select name={fieldName} value={fieldValue} onChange={handleChange} required={required} className={inputClass}>
-              <option value="">{placeholder || 'Select'}</option>
-              {options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
-        );
-      }
-      return (
-        <div>
-          <label className={labelClass}>{label}</label>
-          <input name={fieldName} value={fieldValue} onChange={handleChange} type={type} required={required} className={inputClass} placeholder={placeholder} {...(type === 'number' ? { min: 0 } : {})} />
-        </div>
-      );
-    }
-
-    // Sibling mode — show tags + input
-    return (
-      <div>
-        <label className={labelClass}>{label}</label>
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-1.5">
-            {tags.map((tag, idx) => (
-              <span key={idx} className="inline-flex items-center gap-1 bg-primary-50 text-primary-700 text-[11px] font-medium px-2 py-0.5 rounded-md border border-primary-200">
-                {isSelect ? (options?.find(o => String(o.value) === String(tag))?.label || tag) : tag}
-                <button type="button" onClick={() => {
-                  setSiblingRows(prev => prev.map((r, i) => i === idx ? { ...r, [fieldName]: '' } : r).filter(r => r.student_name));
-                }} className="text-primary-400 hover:text-red-500 leading-none">&times;</button>
-              </span>
-            ))}
-          </div>
-        )}
-        {isSelect ? (
-          <select
-            name={fieldName}
-            value={fieldValue}
-            onChange={handleChange}
-            className={inputClass}
-          >
-            <option value="">{placeholder || 'Select'}</option>
-            {options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        ) : (
-          <input
-            name={fieldName}
-            value={fieldValue}
-            onChange={handleChange}
-            type={type}
-            className={inputClass}
-            placeholder={placeholder}
-            {...(type === 'number' ? { min: 0 } : {})}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && fieldValue.toString().trim()) {
-                e.preventDefault();
-                // Save current form state as a new sibling entry
-                if (fieldName === 'student_name') {
-                  setSiblingRows(prev => [...prev, {
-                    student_name: form.student_name.trim(),
-                    class_applying_id: form.class_applying_id,
-                    date_of_birth: form.date_of_birth,
-                    gender: form.gender,
-                    student_phone: form.student_phone || '',
-                    current_school: form.current_school || '',
-                    previous_institute: form.previous_institute || '',
-                    previous_marks_obtained: form.previous_marks_obtained || '',
-                    previous_total_marks: form.previous_total_marks || '',
-                    previous_major_subjects: form.previous_major_subjects || '',
-                    special_needs: form.special_needs || '',
-                  }]);
-                  setForm(prev => ({
-                    ...prev,
-                    student_name: '', date_of_birth: '', gender: '',
-                    class_applying_id: '', student_phone: '', current_school: '',
-                    previous_institute: '', previous_marks_obtained: '',
-                    previous_total_marks: '', previous_major_subjects: '',
-                    special_needs: '',
-                  }));
-                }
-              }
-            }}
-          />
-        )}
-      </div>
-    );
-  }
-
   function renderStudentSection() {
     const classOptions = classes.map(c => ({ value: String(c.id), label: c.name }));
-    const genderOptions = GENDERS.map(g => ({ value: g.value, label: g.label }));
-    const siblingNames = siblingRows.map(r => r.student_name).filter(Boolean);
-    const siblingClasses = siblingRows.map(r => r.class_applying_id).filter(Boolean);
-    const siblingDOBs = siblingRows.map(r => r.date_of_birth).filter(Boolean);
-    const siblingGenders = siblingRows.map(r => r.gender).filter(Boolean);
+    const additionalSiblingRows = siblingRows;
 
     return (
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
         <h3 className="text-base font-semibold text-gray-900 mb-4">Student Information</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {renderTagInput('student_name', 'Student Full Name *', form.student_name, siblingNames, { required: true, placeholder: siblingEnabled ? 'Type name, press Enter to add' : '' })}
-          {renderTagInput('date_of_birth', 'Date of Birth', form.date_of_birth, siblingDOBs, { type: 'date' })}
-          {renderTagInput('gender', 'Gender', form.gender, siblingGenders, { isSelect: true, options: genderOptions })}
-          {renderTagInput('class_applying_id', isCollegeFlow ? 'Discipline *' : 'Class Applying For *', form.class_applying_id, siblingClasses, { isSelect: true, required: true, options: classOptions, placeholder: isCollegeFlow ? 'Select discipline' : 'Select class' })}
+          <div>
+            <label className={labelClass}>Student Full Name *</label>
+            <input
+              name="student_name"
+              value={form.student_name}
+              onChange={handleChange}
+              required
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Date of Birth</label>
+            <input
+              name="date_of_birth"
+              value={form.date_of_birth}
+              onChange={handleChange}
+              type="date"
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Gender</label>
+            <select name="gender" value={form.gender} onChange={handleChange} className={inputClass}>
+              <option value="">Select</option>
+              {GENDERS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>{isCollegeFlow ? 'Discipline *' : 'Class Applying For *'}</label>
+            <select
+              name="class_applying_id"
+              value={form.class_applying_id}
+              onChange={handleChange}
+              required
+              className={inputClass}
+            >
+              <option value="">{isCollegeFlow ? 'Select discipline' : 'Select class'}</option>
+              {classOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
 
           {isCollegeFlow ? (
             <>
@@ -860,10 +889,47 @@ export default function InquiryCreate({ manualMode = false }) {
                   {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                 </select>
               </div>
-              {renderTagInput('previous_institute', 'Previous Institute', form.previous_institute, siblingRows.map(r => r.previous_institute).filter(Boolean))}
-              {renderTagInput('previous_major_subjects', 'Major Subjects', form.previous_major_subjects, siblingRows.map(r => r.previous_major_subjects).filter(Boolean), { placeholder: 'e.g. Biology, Chemistry' })}
-              {renderTagInput('previous_marks_obtained', 'Marks Obtained', form.previous_marks_obtained, siblingRows.map(r => r.previous_marks_obtained).filter(Boolean), { type: 'number' })}
-              {renderTagInput('previous_total_marks', 'Total Marks', form.previous_total_marks, siblingRows.map(r => r.previous_total_marks).filter(Boolean), { type: 'number' })}
+              <div>
+                <label className={labelClass}>Previous Institute</label>
+                <input
+                  name="previous_institute"
+                  value={form.previous_institute}
+                  onChange={handleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Major Subjects</label>
+                <input
+                  name="previous_major_subjects"
+                  value={form.previous_major_subjects}
+                  onChange={handleChange}
+                  className={inputClass}
+                  placeholder="e.g. Biology, Chemistry"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Marks Obtained</label>
+                <input
+                  name="previous_marks_obtained"
+                  value={form.previous_marks_obtained}
+                  onChange={handleChange}
+                  type="number"
+                  min={0}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Total Marks</label>
+                <input
+                  name="previous_total_marks"
+                  value={form.previous_total_marks}
+                  onChange={handleChange}
+                  type="number"
+                  min={0}
+                  className={inputClass}
+                />
+              </div>
               <div>
                 <label className={labelClass}>City</label>
                 <input name="city" value={form.city} onChange={handleChange} className={inputClass} disabled={primarySharedLocked} />
@@ -872,7 +938,24 @@ export default function InquiryCreate({ manualMode = false }) {
             </>
           ) : (
             <>
-              {renderTagInput('current_school', 'Current School', form.current_school, siblingRows.map(r => r.current_school).filter(Boolean))}
+              <div>
+                <label className={labelClass}>Student Phone</label>
+                <input
+                  name="student_phone"
+                  value={form.student_phone}
+                  onChange={handleChange}
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{11}"
+                  className={inputClass}
+                  placeholder="03XX-XXXXXXX"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Current School</label>
+                <input name="current_school" value={form.current_school} onChange={handleChange} className={inputClass} />
+              </div>
             </>
           )}
 
@@ -882,6 +965,298 @@ export default function InquiryCreate({ manualMode = false }) {
           </div>
         </div>
 
+        {siblingEnabled && (
+          <div className="mt-6 border-t border-gray-100 pt-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900">Additional Siblings</h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  Add as many siblings as needed. Shared parent information will stay same.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addSiblingRow}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-primary-200 text-primary-700 hover:bg-primary-50"
+              >
+                + Add Sibling
+              </button>
+            </div>
+
+            {additionalSiblingRows.length === 0 ? (
+              <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-4 text-sm text-gray-600">
+                No additional sibling added yet. Click <span className="font-medium">+ Add Sibling</span>.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {additionalSiblingRows.map((row, index) => (
+                  <div key={`sibling-row-${index}`} className="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <p className="text-sm font-semibold text-gray-900">Sibling {index + 1}</p>
+                      <button
+                        type="button"
+                        onClick={() => removeSiblingRow(index)}
+                        className="text-xs font-medium text-red-600 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelClass}>Student Full Name *</label>
+                        <input
+                          value={row.student_name}
+                          onChange={(e) => updateSiblingRow(index, 'student_name', e.target.value)}
+                          className={inputClass}
+                          placeholder="Enter sibling name"
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Date of Birth</label>
+                        <input
+                          value={row.date_of_birth}
+                          onChange={(e) => updateSiblingRow(index, 'date_of_birth', e.target.value)}
+                          type="date"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Gender</label>
+                        <select
+                          value={row.gender}
+                          onChange={(e) => updateSiblingRow(index, 'gender', e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">Select</option>
+                          {GENDERS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelClass}>{isCollegeFlow ? 'Discipline *' : 'Class Applying For *'}</label>
+                        <select
+                          value={row.class_applying_id}
+                          onChange={(e) => updateSiblingRow(index, 'class_applying_id', e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">{isCollegeFlow ? 'Select discipline' : 'Select class'}</option>
+                          {classOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Student Phone</label>
+                        <input
+                          value={row.student_phone}
+                          onChange={(e) => updateSiblingRow(index, 'student_phone', e.target.value)}
+                          type="tel"
+                          inputMode="numeric"
+                          maxLength={11}
+                          pattern="[0-9]{11}"
+                          className={inputClass}
+                          placeholder="03XX-XXXXXXX"
+                        />
+                      </div>
+                      {isCollegeFlow ? (
+                        <>
+                          <div>
+                            <label className={labelClass}>Previous Institute</label>
+                            <input
+                              value={row.previous_institute}
+                              onChange={(e) => updateSiblingRow(index, 'previous_institute', e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Major Subjects</label>
+                            <input
+                              value={row.previous_major_subjects}
+                              onChange={(e) => updateSiblingRow(index, 'previous_major_subjects', e.target.value)}
+                              className={inputClass}
+                              placeholder="e.g. Biology, Chemistry"
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Marks Obtained</label>
+                            <input
+                              value={row.previous_marks_obtained}
+                              onChange={(e) => updateSiblingRow(index, 'previous_marks_obtained', e.target.value)}
+                              type="number"
+                              min={0}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Total Marks</label>
+                            <input
+                              value={row.previous_total_marks}
+                              onChange={(e) => updateSiblingRow(index, 'previous_total_marks', e.target.value)}
+                              type="number"
+                              min={0}
+                              className={inputClass}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <div>
+                          <label className={labelClass}>Current School</label>
+                          <input
+                            value={row.current_school}
+                            onChange={(e) => updateSiblingRow(index, 'current_school', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      )}
+                      <div className="sm:col-span-2">
+                        <label className={labelClass}>Special Needs / Notes</label>
+                        <textarea
+                          value={row.special_needs}
+                          onChange={(e) => updateSiblingRow(index, 'special_needs', e.target.value)}
+                          rows={2}
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 border-t border-gray-200 pt-3 mt-1">
+                        <h5 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                          Inquiry Details (Sibling)
+                        </h5>
+                      </div>
+
+                      <div>
+                        <label className={labelClass}>Inquiry Date</label>
+                        <input
+                          value={row.inquiry_date}
+                          onChange={(e) => updateSiblingRow(index, 'inquiry_date', e.target.value)}
+                          type="date"
+                          max={today}
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>How They Heard About Us</label>
+                        <select
+                          value={row.source_id}
+                          onChange={(e) => updateSiblingRow(index, 'source_id', e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">Select source</option>
+                          {sources.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                        </select>
+                      </div>
+                      {!isCollegeFlow && (
+                        <div>
+                          <label className={labelClass}>Referral Parent Name</label>
+                          <input
+                            value={row.referral_parent_name}
+                            onChange={(e) => updateSiblingRow(index, 'referral_parent_name', e.target.value)}
+                            className={inputClass}
+                            placeholder="If referred by existing parent"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label className={labelClass}>Session Preference</label>
+                        <select
+                          value={row.session_preference}
+                          onChange={(e) => updateSiblingRow(index, 'session_preference', e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">Select</option>
+                          {SESSION_PREFERENCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                        </select>
+                      </div>
+                      {isAdminOrAbove(user) && (
+                        <div>
+                          <label className={labelClass}>Assign to Staff</label>
+                          <select
+                            value={row.assigned_staff_id}
+                            onChange={(e) => updateSiblingRow(index, 'assigned_staff_id', e.target.value)}
+                            className={inputClass}
+                          >
+                            <option value="">Select staff</option>
+                            {staff.map((s) => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      <div>
+                        <label className={labelClass}>Priority</label>
+                        <select
+                          value={row.priority}
+                          onChange={(e) => updateSiblingRow(index, 'priority', e.target.value)}
+                          className={inputClass}
+                        >
+                          <option value="">Select</option>
+                          {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                      </div>
+
+                      {isCollegeFlow && (
+                        <>
+                          <div>
+                            <label className={labelClass}>Package</label>
+                            <input
+                              value={row.package_name}
+                              onChange={(e) => updateSiblingRow(index, 'package_name', e.target.value)}
+                              className={inputClass}
+                              placeholder="e.g. Merit Scholarship"
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Package Amount</label>
+                            <input
+                              value={row.package_amount}
+                              onChange={(e) => updateSiblingRow(index, 'package_amount', e.target.value)}
+                              type="number"
+                              min={0}
+                              className={inputClass}
+                              placeholder="e.g. 50000"
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Form Taken</label>
+                            <select
+                              value={row.inquiry_form_taken}
+                              onChange={(e) => updateSiblingRow(index, 'inquiry_form_taken', e.target.value)}
+                              className={inputClass}
+                            >
+                              <option value="">Select</option>
+                              <option value="true">Taken</option>
+                              <option value="false">Not Taken</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className={labelClass}>Quota</label>
+                            <select
+                              value={row.quota}
+                              onChange={(e) => updateSiblingRow(index, 'quota', e.target.value)}
+                              className={inputClass}
+                            >
+                              <option value="">Select quota</option>
+                              {QUOTA_TYPES.map((quotaType) => (
+                                <option key={quotaType.value} value={quotaType.value}>{quotaType.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </>
+                      )}
+
+                      <div className="sm:col-span-2">
+                        <label className={labelClass}>Additional Notes</label>
+                        <textarea
+                          value={row.notes}
+                          onChange={(e) => updateSiblingRow(index, 'notes', e.target.value)}
+                          rows={2}
+                          className={inputClass}
+                          placeholder="Any additional notes about this sibling inquiry..."
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -1001,20 +1376,12 @@ export default function InquiryCreate({ manualMode = false }) {
                     <input name="referral_parent_name" value={form.referral_parent_name} onChange={handleChange} className={inputClass} placeholder="If referred by existing parent" />
                   </div>
                 )}
-                {isCollegeFlow && !isSuperAdmin(user) && (
+                {!isSuperAdmin(user) && (
                   <div>
                     <label className={labelClass}>Campus *</label>
-                    <select
-                      name="campus_id"
-                      value={form.campus_id}
-                      onChange={handleChange}
-                      required
-                      disabled
-                      className={inputClass}
-                    >
-                      <option value="">Select campus</option>
-                      {campuses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <div className={`${inputClass} bg-gray-50 text-gray-700`}>
+                      {selectedCampus?.name || user?.campus?.name || 'Campus'}
+                    </div>
                   </div>
                 )}
                 {isCollegeFlow && (
@@ -1078,6 +1445,17 @@ export default function InquiryCreate({ manualMode = false }) {
                     <select name="priority" value={form.priority} onChange={handleChange} className={inputClass} disabled={primarySharedLocked}>
                       <option value="">Select</option>
                       {PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                  </div>
+                )}
+                {isCollegeFlow && (
+                  <div>
+                    <label className={labelClass}>Quota</label>
+                    <select name="quota" value={form.quota} onChange={handleChange} className={inputClass}>
+                      <option value="">Select quota</option>
+                      {QUOTA_TYPES.map((quotaType) => (
+                        <option key={quotaType.value} value={quotaType.value}>{quotaType.label}</option>
+                      ))}
                     </select>
                   </div>
                 )}

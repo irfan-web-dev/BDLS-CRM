@@ -195,6 +195,11 @@ export default function Dashboard() {
     collegeCount: Number(s?.breakdown?.college ?? s?.collegeCount ?? 0) || 0,
     unknownCount: Number(s?.breakdown?.unknown ?? s?.unknownCount ?? 0) || 0,
   }));
+  const inquiryDailyTrend = Array.isArray(admissionStats?.dailyInquiryData)
+    ? admissionStats.dailyInquiryData
+    : [];
+  const last7Inquiries = Number(admissionStats?.last7DaysInquiries)
+    || inquiryDailyTrend.slice(-7).reduce((sum, row) => sum + (Number(row?.count) || 0), 0);
   const scopeLabel = CAMPUS_SCOPE_LABELS[campusType] || 'School';
   const isAllCampuses = campusType === 'all';
   const sourceTooltipContent = ({ active, payload }) => {
@@ -689,6 +694,13 @@ export default function Dashboard() {
           subtitle="New inquiries"
         />
         <StatCard
+          title="Last 7 Days"
+          value={last7Inquiries}
+          icon={TrendingUp}
+          color="purple"
+          subtitle="Total inquiries"
+        />
+        <StatCard
           title="This Month"
           value={admissionStats?.thisMonth || 0}
           icon={TrendingUp}
@@ -814,6 +826,22 @@ export default function Dashboard() {
                     })}
                     {topAreas.length === 0 && <p className="text-sm text-gray-400">No area data</p>}
                   </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Daily Inquiries (14 Days)</p>
+                  {inquiryDailyTrend.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={inquiryDailyTrend.slice(-14)}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-sm text-gray-400">No daily inquiry data</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1105,7 +1133,7 @@ export default function Dashboard() {
             <select
               value={activityTimeFilter}
               onChange={e => setActivityTimeFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+              className="max-w-full rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
             >
               {ACTIVITY_TIME_FILTERS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1115,15 +1143,15 @@ export default function Dashboard() {
           <p className="text-[11px] text-gray-500 mb-3">
             Showing {filteredRecentActivity.length} of {recentActivity.length} activities
           </p>
-          <div className="h-[26rem] overflow-y-auto pr-1">
+          <div className="h-[26rem] overflow-y-auto overflow-x-hidden pr-1">
             <div className="space-y-3">
               {filteredRecentActivity.map((act) => {
                 const inquiryTargetId = getActivityInquiryId(act);
                 const changedFields = getActivityChangedFields(act).map(formatActivityField);
                 const rowContent = (
-                  <div className="flex items-start gap-3 text-sm">
+                  <div className="flex items-start gap-3 text-sm min-w-0">
                     <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0 break-words">
                       <span className="text-gray-900">{formatActivityAction(act.action)}</span>
                       {act.entity_type && <span className="text-gray-400"> ({act.entity_type} #{act.entity_id})</span>}
                       {changedFields.length > 0 && (
@@ -1139,11 +1167,11 @@ export default function Dashboard() {
                   </div>
                 );
                 return inquiryTargetId ? (
-                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 -m-2 hover:bg-gray-50 transition-colors">
+                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 hover:bg-gray-50 transition-colors">
                     {rowContent}
                   </Link>
                 ) : (
-                  <div key={act.id} className="rounded-lg p-2 -m-2">
+                  <div key={act.id} className="rounded-lg p-2">
                     {rowContent}
                   </div>
                 );
@@ -1161,11 +1189,11 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center justify-between gap-2 mb-3">
             <h3 className="text-sm font-semibold text-gray-900">Recent Activity</h3>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 max-w-full">
               <select
                 value={activityStaffFilter}
                 onChange={e => setActivityStaffFilter(e.target.value)}
-                className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+                className="max-w-full rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
               >
                 <option value="all">All Staff Activity</option>
                 {activityStaffOptions.map((staffOption) => (
@@ -1175,7 +1203,7 @@ export default function Dashboard() {
               <select
                 value={activityTimeFilter}
                 onChange={e => setActivityTimeFilter(e.target.value)}
-                className="rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
+                className="max-w-full rounded-lg border border-gray-300 py-1.5 px-2.5 text-xs outline-none"
               >
                 {ACTIVITY_TIME_FILTERS.map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1186,15 +1214,15 @@ export default function Dashboard() {
           <p className="text-[11px] text-gray-500 mb-3">
             Showing {filteredRecentActivity.length} of {recentActivity.length} activities
           </p>
-          <div className="h-[26rem] overflow-y-auto pr-1">
+          <div className="h-[26rem] overflow-y-auto overflow-x-hidden pr-1">
             <div className="space-y-3">
               {filteredRecentActivity.map((act) => {
                 const inquiryTargetId = getActivityInquiryId(act);
                 const changedFields = getActivityChangedFields(act).map(formatActivityField);
                 const rowContent = (
-                  <div className="flex items-start gap-3 text-sm">
+                  <div className="flex items-start gap-3 text-sm min-w-0">
                     <div className="mt-1 h-2 w-2 rounded-full bg-primary-400 shrink-0" />
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0 break-words">
                       <span className="font-medium text-gray-900">{act.user?.name || 'System'}</span>
                       <span className="text-gray-500"> {formatActivityAction(act.action)}</span>
                       {act.entity_type && <span className="text-gray-400"> ({act.entity_type} #{act.entity_id})</span>}
@@ -1211,11 +1239,11 @@ export default function Dashboard() {
                   </div>
                 );
                 return inquiryTargetId ? (
-                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 -m-2 hover:bg-gray-50 transition-colors">
+                  <Link key={act.id} to={`/inquiries/${inquiryTargetId}`} className="block rounded-lg p-2 hover:bg-gray-50 transition-colors">
                     {rowContent}
                   </Link>
                 ) : (
-                  <div key={act.id} className="rounded-lg p-2 -m-2">
+                  <div key={act.id} className="rounded-lg p-2">
                     {rowContent}
                   </div>
                 );

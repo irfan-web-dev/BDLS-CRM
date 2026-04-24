@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Edit2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Edit2, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext';
 import { isAdminOrAbove, isSuperAdmin } from '../../utils/roleUtils';
 import { formatDate, isOverdue } from '../../utils/helpers';
-import { INQUIRY_STATUSES, PRIORITIES, GENDERS } from '../../utils/constants';
+import {
+  INQUIRY_STATUSES, PRIORITIES, GENDERS, QUOTA_TYPES,
+} from '../../utils/constants';
 import PageHeader from '../../components/ui/PageHeader';
 import SearchInput from '../../components/ui/SearchInput';
 import FilterBar from '../../components/ui/FilterBar';
@@ -23,6 +25,8 @@ export default function InquiryList() {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({});
   const [page, setPage] = useState(1);
+  const [inquirySummary, setInquirySummary] = useState(null);
+  const [deletingInquiryId, setDeletingInquiryId] = useState(null);
 
   // Load filter options
   const [campuses, setCampuses] = useState([]);
@@ -38,6 +42,7 @@ export default function InquiryList() {
 
   const selectedCampusIds = (filters.campus_id || []).map(String);
   const selectedCampuses = campuses.filter(c => selectedCampusIds.includes(String(c.id)));
+  const quotaLabelMap = QUOTA_TYPES.reduce((acc, item) => ({ ...acc, [item.value]: item.label }), {});
   const isCollegeContext = user?.campus?.campus_type === 'college' || (
     isSuperAdmin(user) && (
       selectedCampusIds.length > 0
@@ -54,6 +59,7 @@ export default function InquiryList() {
         delete next.previous_institute;
         delete next.area;
         delete next.gender;
+        delete next.quota;
         delete next.marks_sort;
         return next;
       });
@@ -63,6 +69,10 @@ export default function InquiryList() {
   useEffect(() => {
     loadInquiries();
   }, [search, filters, page]);
+
+  useEffect(() => {
+    loadInquirySummary();
+  }, [user?.id, user?.role, user?.campus?.campus_type, filters.campus_id, campuses]);
 
   async function loadFilterOptions() {
     try {
@@ -126,9 +136,46 @@ export default function InquiryList() {
     }
   }
 
+  function resolveCampusTypeScope() {
+    if (!isSuperAdmin(user)) return user?.campus?.campus_type || null;
+
+    if (!selectedCampusIds.length) {
+      const uniqueTypes = new Set(campuses.map(c => c.campus_type).filter(Boolean));
+      return uniqueTypes.size === 1 ? [...uniqueTypes][0] : null;
+    }
+
+    if (!selectedCampuses.length || selectedCampuses.length !== selectedCampusIds.length) return null;
+    const uniqueTypes = new Set(selectedCampuses.map(c => c.campus_type).filter(Boolean));
+    return uniqueTypes.size === 1 ? [...uniqueTypes][0] : null;
+  }
+
+  async function loadInquirySummary() {
+    try {
+      const params = {};
+      const campusType = resolveCampusTypeScope();
+      if (isSuperAdmin(user) && campusType) {
+        params.campus_type = campusType;
+      }
+      const res = await api.get('/dashboard/admission-stats', { params });
+      setInquirySummary(res.data || null);
+    } catch (err) {
+      console.error(err);
+      setInquirySummary(null);
+    }
+  }
+
   const filterConfig = [
     { key: 'status', label: 'All Statuses', options: INQUIRY_STATUSES.map(s => ({ value: s.value, label: s.label })) },
     { key: 'priority', label: 'All Priorities', options: PRIORITIES.map(p => ({ value: p.value, label: p.label })) },
+    {
+      key: 'inquiry_timeframe',
+      label: 'Inquiry Time',
+      options: [
+        { value: 'today', label: 'Today' },
+        { value: 'weekly', label: 'Weekly' },
+        { value: 'monthly', label: 'Monthly' },
+      ],
+    },
     {
       key: 'is_manual_entry',
       label: 'All Entry Types',
@@ -161,6 +208,7 @@ export default function InquiryList() {
       { key: 'gender', label: 'All Genders', options: GENDERS.map(g => ({ value: g.value, label: g.label })) },
       { key: 'area', label: 'All Areas', options: areas.map(a => ({ value: a, label: a })) },
       { key: 'previous_institute', label: 'All Previous Institutes', options: previousInstitutes.map(i => ({ value: i, label: i })) },
+      { key: 'quota', label: 'All Quotas', options: QUOTA_TYPES.map(q => ({ value: q.value, label: q.label })) },
     );
   }
 
@@ -180,11 +228,39 @@ export default function InquiryList() {
     navigate(`/inquiries/${id}`);
   }
 
+  async function handleDeleteInquiry(inquiry) {
+    if (!isSuperAdmin(user)) return;
+    const confirmed = window.confirm(`Delete inquiry for "${inquiry.student_name}"?`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingInquiryId(inquiry.id);
+      await api.delete(`/inquiries/${inquiry.id}`);
+
+      if (inquiries.length === 1 && page > 1) {
+        setPage(prev => Math.max(prev - 1, 1));
+      } else {
+        await Promise.all([loadInquiries(), loadInquirySummary()]);
+      }
+    } catch (err) {
+      console.error('Delete inquiry failed:', err);
+      window.alert(err?.response?.data?.error || 'Failed to delete inquiry');
+    } finally {
+      setDeletingInquiryId(null);
+    }
+  }
+
+  const headerSubtitle = [
+    `${inquirySummary?.totalInquiries ?? pagination.total ?? 0} total inquiries`,
+    `Today: ${inquirySummary?.todayCount ?? 0}`,
+    `Last 7 Days: ${inquirySummary?.last7DaysInquiries ?? 0}`,
+  ].join(' · ');
+
   return (
     <div>
       <PageHeader
         title="Inquiries"
-        subtitle={`${pagination.total || 0} total inquiries`}
+        subtitle={headerSubtitle}
         action={
           <Link
             to="/inquiries/new"
@@ -287,13 +363,27 @@ export default function InquiryList() {
                       </p>
                       <p className="text-sm text-gray-500 truncate">{inq.parent_name} &middot; {inq.parent_phone}</p>
                     </div>
-                    <button
-                      data-action="edit"
-                      onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
-                      className="rounded p-1.5 hover:bg-gray-100 text-gray-400 flex-shrink-0"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        data-action="edit"
+                        onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
+                        className="rounded p-1.5 hover:bg-gray-100 text-gray-400 flex-shrink-0"
+                        title="Edit"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      {isSuperAdmin(user) && (
+                        <button
+                          data-action="delete"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteInquiry(inq); }}
+                          disabled={deletingInquiryId === inq.id}
+                          className="rounded p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 flex-shrink-0 disabled:opacity-50"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <InquiryStatusBadge status={inq.status} />
@@ -301,6 +391,11 @@ export default function InquiryList() {
                     {inq.is_manual_entry && (
                       <span className="text-xs bg-blue-100 text-blue-700 rounded px-2 py-0.5 font-medium">
                         Manual
+                      </span>
+                    )}
+                    {isCollegeContext && inq.quota && (
+                      <span className="text-xs bg-emerald-100 text-emerald-700 rounded px-2 py-0.5 font-medium">
+                        {quotaLabelMap[inq.quota] || inq.quota}
                       </span>
                     )}
                     {inq.classApplying && (
@@ -336,6 +431,7 @@ export default function InquiryList() {
                     <th className="px-4 py-3">Parent</th>
                     <th className="px-4 py-3">Phone</th>
                     <th className="px-4 py-3">Class</th>
+                    {isCollegeContext && <th className="px-4 py-3">Quota</th>}
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Priority</th>
                     <th className="px-4 py-3">Follow-up</th>
@@ -365,6 +461,9 @@ export default function InquiryList() {
                       <td className="px-4 py-3 text-gray-600">{inq.parent_name}</td>
                       <td className="px-4 py-3 text-gray-600">{inq.parent_phone}</td>
                       <td className="px-4 py-3 text-gray-600">{inq.classApplying?.name}</td>
+                      {isCollegeContext && (
+                        <td className="px-4 py-3 text-gray-600">{inq.quota ? (quotaLabelMap[inq.quota] || inq.quota) : '-'}</td>
+                      )}
                       <td className="px-4 py-3"><InquiryStatusBadge status={inq.status} /></td>
                       <td className="px-4 py-3"><PriorityBadge priority={inq.priority} /></td>
                       <td className="px-4 py-3">
@@ -385,14 +484,27 @@ export default function InquiryList() {
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-sm">{inq.assignedStaff?.name || '-'}</td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          data-action="edit"
-                          onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
-                          className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-                          title="Edit"
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            data-action="edit"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/inquiries/${inq.id}/edit`); }}
+                            className="rounded p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          {isSuperAdmin(user) && (
+                            <button
+                              data-action="delete"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteInquiry(inq); }}
+                              disabled={deletingInquiryId === inq.id}
+                              className="rounded p-1.5 hover:bg-red-50 text-red-500 hover:text-red-600 disabled:opacity-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
